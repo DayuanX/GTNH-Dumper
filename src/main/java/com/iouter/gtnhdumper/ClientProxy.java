@@ -1,5 +1,7 @@
 package com.iouter.gtnhdumper;
 
+import com.iouter.gtnhdumper.automation.ExportSession;
+
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
@@ -20,6 +22,7 @@ public class ClientProxy extends CommonProxy {
     // load "Do your mod setup. Build whatever data structures you care about. Register recipes."
     public void init(FMLInitializationEvent event) {
         super.init(event);
+        ExportSession.register();
     }
 
     // postInit "Handle interaction with other mods, complete your setup based on this."
@@ -46,5 +49,6 @@ public class ClientProxy extends CommonProxy {
 
     public void serverStopped(FMLServerStoppedEvent event) {
         super.serverStopped(event);
+        ExportSession.serverStopped();
     }
 }

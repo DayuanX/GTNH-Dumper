@@ -1,14 +1,18 @@
 package com.iouter.gtnhdumper.common.utils;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import net.minecraft.creativetab.CreativeTabs;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.ChatComponentText;
 
+import codechicken.nei.NEIClientUtils;
 import cpw.mods.fml.common.registry.GameData;
 import gregtech.api.items.CircuitComponentFakeItem;
 import gregtech.common.tileentities.machines.multi.nanochip.util.CircuitComponent;
@@ -23,7 +27,9 @@ public class AllItemStacks {
     private AllItemStacks() {}
 
     public static List<ItemStack> getAllItemStacks() {
-        if (allItemStacks == null) {
+        List<ItemStack> result = allItemStacks;
+        if (result == null) {
+            int creativeFailures = 0;
             List<ItemStack> itemStacks = new ArrayList<>();
             Map<ItemStack, String> itemRegistryNames = new IdentityHashMap<>();
             for (Object temp : GameData.getItemRegistry()) {
@@ -31,12 +37,17 @@ public class AllItemStacks {
                 String registryName = GameData.getItemRegistry()
                     .getNameForObject(item);
                 List<ItemStack> sub = new ArrayList<>();
-                if (item == CircuitComponentFakeItem.INSTANCE) {
-                    for (CircuitComponent component : CircuitComponent.VALUES) {
-                        sub.add(component.getFakeStack(1));
+                try {
+                    if (item == CircuitComponentFakeItem.INSTANCE) {
+                        for (CircuitComponent component : CircuitComponent.VALUES) {
+                            sub.add(component.getFakeStack(1));
+                        }
+                    } else {
+                        item.getSubItems(item, CreativeTabs.tabAllSearch, sub);
                     }
-                } else {
-                    item.getSubItems(item, CreativeTabs.tabAllSearch, sub);
+                } catch (Exception | LinkageError e) {
+                    creativeFailures++;
+                    RecipeItemVariants.reportFailure("creative items: " + registryName, e);
                 }
                 for (ItemStack itemStack : sub) {
                     if (Utils.isStackInvalid(itemStack)) {
@@ -46,10 +57,29 @@ public class AllItemStacks {
                     itemRegistryNames.put(itemStack, registryName);
                 }
             }
+            Set<RecipeItemVariants.Key> known = new HashSet<>();
+            for (ItemStack stack : itemStacks) known.add(new RecipeItemVariants.Key(stack));
+            for (ItemStack stack : RecipeItemVariants.get()) {
+                if (known.add(new RecipeItemVariants.Key(stack))) {
+                    itemStacks.add(stack);
+                    itemRegistryNames.put(
+                        stack,
+                        GameData.getItemRegistry()
+                            .getNameForObject(stack.getItem()));
+                }
+            }
             registryNames = itemRegistryNames;
-            allItemStacks = itemStacks;
+            result = itemStacks;
+            if (creativeFailures == 0 && RecipeItemVariants.isComplete()) allItemStacks = result;
+            if (creativeFailures > 0) {
+                NEIClientUtils.printChatMessage(
+                    new ChatComponentText(
+                        "Creative item enumeration incomplete: " + creativeFailures
+                            + " failures. See log; the next item/icon export will retry."));
+            }
         }
-        return allItemStacks;
+        RecipeItemVariants.warnIfIncomplete();
+        return result;
     }
 
     public static List<ItemStack> getFilteredItemStacks() {

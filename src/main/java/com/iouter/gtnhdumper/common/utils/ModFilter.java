@@ -8,6 +8,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.Fluid;
 import net.minecraftforge.fluids.FluidRegistry;
 
+import com.iouter.gtnhdumper.automation.ExportSession;
 import com.iouter.gtnhdumper.common.base.ModFilterOption;
 
 import codechicken.core.CommonUtils;
@@ -54,7 +55,7 @@ public final class ModFilter {
     }
 
     public static ModFilter current() {
-        String input = ModFilterOption.INSTANCE.value();
+        String input = ExportSession.isExporting() ? "" : ModFilterOption.INSTANCE.value();
         if (cachedFilter != null && java.util.Objects.equals(input, cachedInput)) return cachedFilter;
         Map<String, String> mods = new LinkedHashMap<>();
         mods.put("minecraft", "Minecraft");
@@ -147,6 +148,7 @@ public final class ModFilter {
     }
 
     public File outputFile(String relativePath) {
+        if (ExportSession.isExporting()) return new File(ExportSession.outputDirectory(), relativePath);
         return new File(CommonUtils.getMinecraftDir(), "dumps/" + relativeDirectory() + relativePath);
     }
 }

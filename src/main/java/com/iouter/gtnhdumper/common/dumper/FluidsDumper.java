@@ -31,12 +31,13 @@ public class FluidsDumper extends WikiDumper {
     private static final String VISCOSITY = "viscosity";
     private static final String IS_GASEOUS = "isGaseous";
     private static final String CAN_BE_PLACED = "canBePlaced";
+    private static final String REGISTERED_BY = "registeredBy";
 
     private static final String GT_DISPLAY_KEY = "gtDisplayKey";
     private static final String TOOLTIPS = "tooltips";
 
     private static final String[] HEADER = new String[] { KEY, ORIGINAL_NAME, TRANSLATED_NAME, LUMINOSITY, DENSITY,
-        TEMPERATURE, VISCOSITY, IS_GASEOUS, CAN_BE_PLACED };
+        TEMPERATURE, VISCOSITY, IS_GASEOUS, CAN_BE_PLACED, REGISTERED_BY };
 
     public FluidsDumper() {
         super("tools.dump.gtnhdumper.fluid");
@@ -94,10 +95,14 @@ public class FluidsDumper extends WikiDumper {
             int viscosity = fluid.getViscosity();
             boolean isGaseous = fluid.isGaseous();
             boolean canBePlaced = fluid.canBePlacedInWorld();
+            // Forge records the original registering mod; the GT display item is only a renderer.
+            String registeredName = FluidRegistry.getDefaultFluidName(fluid);
+            int separator = registeredName == null ? -1 : registeredName.indexOf(':');
+            String registeredBy = separator > 0 ? registeredName.substring(0, separator) : "";
             if (!CommonProxy.isGTLoaded) {
                 list.add(
                     new Object[] { "fluid." + fluidKey, originalName, translatedName, luminosity, density, temperature,
-                        viscosity, isGaseous, canBePlaced });
+                        viscosity, isGaseous, canBePlaced, registeredBy });
                 continue;
             }
             int id = fluid.getID();
@@ -106,7 +111,7 @@ public class FluidsDumper extends WikiDumper {
             String tooltips = Utils.getTooltip(gtDisplay);
             list.add(
                 new Object[] { "fluid." + fluidKey, originalName, translatedName, luminosity, density, temperature,
-                    viscosity, isGaseous, canBePlaced, gtDisplayKey, tooltips });
+                    viscosity, isGaseous, canBePlaced, registeredBy, gtDisplayKey, tooltips });
         }
         return list;
     }

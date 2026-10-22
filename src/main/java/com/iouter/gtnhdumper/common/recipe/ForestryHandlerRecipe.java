@@ -12,6 +12,7 @@ import net.minecraft.item.ItemStack;
 
 import com.iouter.gtnhdumper.common.recipe.base.BaseHandlerRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.RecipeItem;
+import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 import com.iouter.gtnhdumper.common.utils.RecipeUtil;
 
 import codechicken.nei.recipe.IRecipeHandler;
@@ -31,7 +32,8 @@ public class ForestryHandlerRecipe extends BaseHandlerRecipe {
         if (handler instanceof BaseBreedingRecipeHandler breeding) {
             try {
                 breeding.loadCraftingRecipes(breeding.getRecipeIdent(), (Object) null);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                RecipeItemVariants.reportFailure("ForestryHandlerRecipe.java", e);
 
             }
             breeding.arecipes.stream()
@@ -45,31 +47,41 @@ public class ForestryHandlerRecipe extends BaseHandlerRecipe {
                             .setRequirements(recipe.requirements)));
         } else if (handler instanceof BaseProduceRecipeHandler produce) {
             for (IAlleleSpecies species : produce.getAllSpecies()) {
-                ForestryRecipe recipe = new ForestryRecipe();
-                ItemStack inputStack = GeneticsUtils.stackFromSpecies(species, GeneticsUtils.RecipePosition.Producer);
-                recipe.setInputItems(new RecipeItem(inputStack));
-                for (Map.Entry<ItemStack, Float> product : net.bdew.neiaddons.Utils
-                    .mergeStacks(GeneticsUtils.getProduceFromSpecies(species))
-                    .entrySet()) {
-                    recipe.setOutputItems(
-                        new RecipeItem(product.getKey()).withChance((int) (product.getValue() * 10000)));
-                }
-                String jubilance = null;
-                if (species instanceof IAlleleBeeSpeciesCustom) {
-                    IJubilanceProvider provider = ((IAlleleBeeSpeciesCustom) species).getJubilanceProvider();
-                    if (provider != null) jubilance = provider.getDescription();
-                }
-                for (Map.Entry<ItemStack, Float> product : net.bdew.neiaddons.Utils
-                    .mergeStacks(GeneticsUtils.getSpecialtyFromSpecies(species))
-                    .entrySet()) {
-                    RecipeItem item = new RecipeItem(product.getKey()).withChance((int) (product.getValue() * 10000));
-                    if (jubilance != null) {
-                        recipe.setOtherItems(item.withTooltip(jubilance));
-                    } else {
-                        recipe.setOtherItems(item);
+                try {
+                    ForestryRecipe recipe = new ForestryRecipe();
+                    ItemStack inputStack = GeneticsUtils
+                        .stackFromSpecies(species, GeneticsUtils.RecipePosition.Producer);
+                    recipe.setInputItems(new RecipeItem(inputStack));
+                    for (Map.Entry<ItemStack, Float> product : net.bdew.neiaddons.Utils
+                        .mergeStacks(GeneticsUtils.getProduceFromSpecies(species))
+                        .entrySet()) {
+                        recipe.setOutputItems(
+                            new RecipeItem(product.getKey()).withChance((int) (product.getValue() * 10000)));
                     }
+                    String jubilance = null;
+                    if (species instanceof IAlleleBeeSpeciesCustom) {
+                        IJubilanceProvider provider = ((IAlleleBeeSpeciesCustom) species).getJubilanceProvider();
+                        if (provider != null) jubilance = provider.getDescription();
+                    }
+                    for (Map.Entry<ItemStack, Float> product : net.bdew.neiaddons.Utils
+                        .mergeStacks(GeneticsUtils.getSpecialtyFromSpecies(species))
+                        .entrySet()) {
+                        RecipeItem item = new RecipeItem(product.getKey())
+                            .withChance((int) (product.getValue() * 10000));
+                        if (jubilance != null) {
+                            recipe.setOtherItems(item.withTooltip(jubilance));
+                        } else {
+                            recipe.setOtherItems(item);
+                        }
+                    }
+                    // 无果实/特产的树种没有产物配方，不生成只有输入的记录。
+                    if ((recipe.outputItems != null && !recipe.outputItems.isEmpty())
+                        || (recipe.otherItems != null && !recipe.otherItems.isEmpty())) recipes.add(recipe);
+
+                } catch (RuntimeException | LinkageError e) {
+                    if (!RecipeItemVariants.isCollecting()) throw e;
+                    RecipeItemVariants.reportFailure("ForestryHandlerRecipe.java entry", e);
                 }
-                recipes.add(recipe);
             }
         }
         return recipes;

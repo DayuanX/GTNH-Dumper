@@ -81,7 +81,7 @@ public class GTStructuresDumper extends FilteredDataDumper {
                 } catch (Exception e) {
                     GTNHDumper.info("导出" + simpleName + "时发生错误：" + e.getLocalizedMessage());
                     file.deleteOnExit();
-                    e.printStackTrace();
+                    GTNHDumper.LOG.error("Could not export structure " + simpleName, e);
                 }
             });
     }

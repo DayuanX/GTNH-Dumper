@@ -17,11 +17,11 @@ import net.minecraft.util.EnumChatFormatting;
 
 import com.google.gson.JsonObject;
 import com.gtnewhorizons.modularui.api.drawable.FallbackableUITexture;
-import com.iouter.gtnhdumper.GTNHDumper;
 import com.iouter.gtnhdumper.common.recipe.base.BaseHandlerRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.RecipeFluid;
 import com.iouter.gtnhdumper.common.recipe.base.RecipeItem;
 import com.iouter.gtnhdumper.common.utils.ModFilter;
+import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 import com.iouter.gtnhdumper.common.utils.Transformer;
 import com.iouter.gtnhdumper.common.utils.Utils;
 
@@ -88,7 +88,7 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
         ModFilter filter = ModFilter.current();
         if (recipeMap.getFrontend() instanceof EyeOfHarmonyFrontend) {
             // This custom storage does not retain GTRecipe's owner history.
-            if (filter.isActive()) return recipes;
+            if (filter.isActive() && !RecipeItemVariants.isCollecting()) return recipes;
             try {
                 EyeOfHarmonyRecipeStorage storage = TecTech.eyeOfHarmonyRecipeStorage;
                 Class<?> clazz = EyeOfHarmonyRecipeStorage.class;
@@ -98,62 +98,82 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
                 HashMap<String, EyeOfHarmonyRecipe> recipeHashMap = (HashMap<String, EyeOfHarmonyRecipe>) recipeHashMapField
                     .get(storage);
                 for (EyeOfHarmonyRecipe recipe : recipeHashMap.values()) {
-                    ItemStack planetItem = recipe.getRecipeTriggerItem()
-                        .copy();
-                    planetItem.stackSize = 0;
-                    ArrayList<Object> inputItems = new ArrayList<>();
-                    inputItems.add(new RecipeItem(planetItem));
-                    ArrayList<RecipeFluid> inputFluids = new ArrayList<>();
-                    inputFluids
-                        .add(new RecipeFluid(Materials.Hydrogen.getGas(0)).withAmount(recipe.getHydrogenRequirement()));
-                    inputFluids
-                        .add(new RecipeFluid(Materials.Helium.getGas(0)).withAmount(recipe.getHeliumRequirement()));
-                    ArrayList<Object> outputItems = new ArrayList<>();
-                    for (ItemStackLong itemStackLong : recipe.getOutputItems()) {
-                        outputItems.add(new RecipeItem(itemStackLong.itemStack).withAmount(itemStackLong.stackSize));
+                    try {
+                        ItemStack planetItem = recipe.getRecipeTriggerItem()
+                            .copy();
+                        planetItem.stackSize = 0;
+                        ArrayList<Object> inputItems = new ArrayList<>();
+                        inputItems.add(new RecipeItem(planetItem));
+                        ArrayList<RecipeFluid> inputFluids = new ArrayList<>();
+                        inputFluids.add(
+                            new RecipeFluid(Materials.Hydrogen.getGas(0)).withAmount(recipe.getHydrogenRequirement()));
+                        inputFluids
+                            .add(new RecipeFluid(Materials.Helium.getGas(0)).withAmount(recipe.getHeliumRequirement()));
+                        ArrayList<Object> outputItems = new ArrayList<>();
+                        for (ItemStackLong itemStackLong : recipe.getOutputItems()) {
+                            outputItems
+                                .add(new RecipeItem(itemStackLong.itemStack).withAmount(itemStackLong.stackSize));
+                        }
+                        ArrayList<RecipeFluid> outputFluids = new ArrayList<>();
+                        for (FluidStackLong fluidStackLong : recipe.getOutputFluids()) {
+                            outputFluids
+                                .add(new RecipeFluid(fluidStackLong.fluidStack).withAmount(fluidStackLong.amount));
+                        }
+                        Map<String, Object> metadata = new LinkedHashMap<>();
+                        metadata.put("spacetimeCasingTierRequired", recipe.getSpacetimeCasingTierRequired());
+                        metadata.put(
+                            "spacetimeCasingTierName",
+                            EnumChatFormatting.getTextWithoutFormattingCodes(
+                                EOH_TIER_FANCY_NAMES[(int) recipe.getSpacetimeCasingTierRequired()]));
+                        // Total EU per recipe, not EU/t. Keep the long values without display rounding.
+                        metadata.put("euOutput", recipe.getEUOutput());
+                        metadata.put("euStartCost", recipe.getEUStartCost());
+                        // Raw ratios: 0.55 means 55% success; 1.5 means 150% energy efficiency.
+                        metadata.put("baseRecipeSuccessChance", recipe.getBaseRecipeSuccessChance());
+                        metadata.put("recipeEnergyEfficiency", recipe.getRecipeEnergyEfficiency());
+                        recipes.add(
+                            new GTDumpedRecipe(
+                                inputItems,
+                                inputFluids,
+                                outputItems,
+                                outputFluids,
+                                null,
+                                0,
+                                recipe.getRecipeTimeInTicks(),
+                                0,
+                                metadata));
+
+                    } catch (RuntimeException | LinkageError e) {
+                        if (!RecipeItemVariants.isCollecting()) throw e;
+                        RecipeItemVariants.reportFailure("GTDefaultHandlerRecipe.java entry", e);
                     }
-                    ArrayList<RecipeFluid> outputFluids = new ArrayList<>();
-                    for (FluidStackLong fluidStackLong : recipe.getOutputFluids()) {
-                        outputFluids.add(new RecipeFluid(fluidStackLong.fluidStack).withAmount(fluidStackLong.amount));
-                    }
-                    Map<String, Object> metadata = new LinkedHashMap<>();
-                    metadata.put("spacetimeCasingTierRequired", recipe.getSpacetimeCasingTierRequired());
-                    metadata.put(
-                        "spacetimeCasingTierName",
-                        EnumChatFormatting.getTextWithoutFormattingCodes(
-                            EOH_TIER_FANCY_NAMES[(int) recipe.getSpacetimeCasingTierRequired()]));
-                    // Total EU per recipe, not EU/t. Keep the long values without display rounding.
-                    metadata.put("euOutput", recipe.getEUOutput());
-                    metadata.put("euStartCost", recipe.getEUStartCost());
-                    // Raw ratios: 0.55 means 55% success; 1.5 means 150% energy efficiency.
-                    metadata.put("baseRecipeSuccessChance", recipe.getBaseRecipeSuccessChance());
-                    metadata.put("recipeEnergyEfficiency", recipe.getRecipeEnergyEfficiency());
-                    recipes.add(
-                        new GTDumpedRecipe(
-                            inputItems,
-                            inputFluids,
-                            outputItems,
-                            outputFluids,
-                            null,
-                            0,
-                            recipe.getRecipeTimeInTicks(),
-                            0,
-                            metadata));
                 }
             } catch (NoSuchFieldException | IllegalAccessException e) {
-                GTNHDumper.LOG.error(e);
+                RecipeItemVariants.reportFailure("Eye of Harmony storage", e);
             }
             return recipes;
         }
         gtRecipes.stream()
             .filter(gtRecipe -> gtRecipe.getRecipeCategory() == category)
             .filter(
-                gtRecipe -> !filter.isActive() || filter.matchesOriginalOwner(
-                    gtRecipe.owners == null ? null
-                        : gtRecipe.owners.stream()
-                            .map(owner -> owner == null ? null : owner.getModId())
-                            .collect(Collectors.toList())))
-            .map(Transformer::transformGTRecipe)
+                gtRecipe -> RecipeItemVariants.isCollecting() || !filter.isActive()
+                    || filter.matchesOriginalOwner(
+                        gtRecipe.owners == null ? null
+                            : gtRecipe.owners.stream()
+                                .map(owner -> owner == null ? null : owner.getModId())
+                                .collect(Collectors.toList())))
+            .map(recipe -> {
+                if (!RecipeItemVariants.isCollecting()) return Transformer.transformGTRecipe(recipe);
+                try {
+                    return Transformer.transformGTRecipe(recipe);
+                } catch (Exception | LinkageError e) {
+                    RecipeItemVariants.reportFailure(
+                        handler.getClass()
+                            .getName() + " recipe",
+                        e);
+                    return null;
+                }
+            })
             .filter(Objects::nonNull)
             .forEach(recipes::add);
         return recipes;
@@ -226,6 +246,59 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
         private Integer specialValue;
         private final Map<String, Object> metadata;
         private String sourceMod;
+        private List<String> neiDescription;
+        private String neiDescriptionError;
+        private Integer burnTime;
+        private List<String> allowedBoilerTypes;
+        private Map<String, Integer> fluidDurations;
+
+        public GTDumpedRecipe withDisplayData(GTRecipe recipe) {
+            if (RecipeItemVariants.isCollecting()) return this;
+            // 板材切割机按切削液保存实际耗时（tick），顺序与NEI时间列表一致。
+            if (recipe.mSpecialItems instanceof gregtech.loaders.postload.recipes.FakeCuttingSpecialInfo) {
+                try {
+                    Field field = recipe.mSpecialItems.getClass()
+                        .getDeclaredField("fluidsToDurations");
+                    field.setAccessible(true);
+                    @SuppressWarnings("unchecked")
+                    Map<net.minecraftforge.fluids.FluidStack, Integer> durations = (Map<net.minecraftforge.fluids.FluidStack, Integer>) field
+                        .get(recipe.mSpecialItems);
+                    fluidDurations = new LinkedHashMap<>();
+                    durations.forEach(
+                        (fluid, ticks) -> fluidDurations.put(
+                            fluid.getFluid()
+                                .getName(),
+                            ticks));
+                } catch (ReflectiveOperationException error) {
+                    throw new IllegalStateException("Cannot read cutting fluid durations", error);
+                }
+            }
+            if ("gt.recipe.largeboilerfakefuels".equals(recipe.getRecipeCategory().recipeMap.unlocalizedName)
+                && recipe.mInputs.length > 0) {
+                // 大型锅炉固体燃料：mDuration是占位值，保留实际燃烧tick与游戏允许的锅炉类型。
+                ItemStack fuel = recipe.getRepresentativeInput(0);
+                burnTime = gregtech.api.util.GTModHandler.getFuelValue(fuel);
+                allowedBoilerTypes = new ArrayList<>();
+                allowedBoilerTypes.add("bronze");
+                if (burnTime >= 1200) allowedBoilerTypes.add("steel");
+                if (gregtech.api.recipe.maps.LargeBoilerFuelBackend.isAllowedFuel(fuel)) {
+                    allowedBoilerTypes.add("titanium");
+                    allowedBoilerTypes.add("tungstensteel");
+                }
+            }
+            // IC2核反应堆的模型公式暂保留游戏原文；其余机器从已有数值与metadata绘制信息栏。
+            if (!"gt.recipe.ic2nuke".equals(recipe.getRecipeCategory().recipeMap.unlocalizedName)) return this;
+            try {
+                neiDescription = gregtech.nei.DumperRecipeDisplayInfo
+                    .describe(recipe, recipe.getRecipeCategory().recipeMap);
+            } catch (RuntimeException | LinkageError error) {
+                neiDescriptionError = error.getClass()
+                    .getName() + ": "
+                    + error.getMessage();
+                RecipeItemVariants.reportFailure("GT recipe description", error);
+            }
+            return this;
+        }
 
         public GTDumpedRecipe withSourceMod(String sourceMod) {
             this.sourceMod = sourceMod;

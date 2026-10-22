@@ -16,6 +16,7 @@ import org.lwjgl.input.Keyboard;
 import com.google.gson.JsonObject;
 import com.iouter.gtnhdumper.CommonProxy;
 import com.iouter.gtnhdumper.GTNHDumper;
+import com.iouter.gtnhdumper.automation.ExportSession;
 import com.iouter.gtnhdumper.common.base.WikiDumper;
 import com.iouter.gtnhdumper.common.utils.AllItemStacks;
 import com.iouter.gtnhdumper.common.utils.KeySimulator;
@@ -65,7 +66,10 @@ public class AdvItemPanelDumper extends WikiDumper {
 
         List<ItemStack> itemStacks = AllItemStacks.getFilteredItemStacks();
         Map<ItemStack, String> originalNameMap = getOriginalNameMap(itemStacks);
-        for (ItemStack stack : itemStacks) {
+        int visited = 0;
+        for (ItemStack identity : itemStacks) {
+            if (++visited % 1000 == 0) ExportSession.progress("advitempanel: " + visited + "/" + itemStacks.size());
+            final ItemStack stack = identity.copy();
             if (Utils.isStackInvalid(stack)) continue;
             GameRegistry.UniqueIdentifier uid;
             try {
@@ -78,7 +82,7 @@ public class AdvItemPanelDumper extends WikiDumper {
             ModContainer mod = Loader.instance()
                 .getIndexedModList()
                 .get(modid);
-            String nbt = Utils.getItemNBT(stack);
+            String nbt = Utils.getItemNBT(identity);
             String modName = mod != null ? mod.getName() : modid;
             List<JsonObject> tooltipStats = TooltipStats.get(stack);
             String tooltip = Utils.getTooltip(stack, tooltipStats);
@@ -117,7 +121,7 @@ public class AdvItemPanelDumper extends WikiDumper {
 
             final String translatedName = EnumChatFormatting
                 .getTextWithoutFormattingCodes(GuiContainerManager.itemDisplayNameShort(stack));
-            final String imageName = ItemIconDumper.getIconFileName(stack);
+            final String imageName = ItemIconDumper.getIconFileName(identity);
             AspectList aspectList = null;
             if (CommonProxy.isTCLoaded) {
                 try {
@@ -128,8 +132,8 @@ public class AdvItemPanelDumper extends WikiDumper {
             }
 
             list.add(
-                new Object[] { Utils.getItemStackShortKey(stack), Utils.getItemKey(stack), nbt,
-                    originalNameMap.get(stack), translatedName, tooltip, tooltips[TOOLTIP_LSHIFT],
+                new Object[] { Utils.getItemStackShortKey(identity), Utils.getItemKey(identity), nbt,
+                    originalNameMap.get(identity), translatedName, tooltip, tooltips[TOOLTIP_LSHIFT],
                     tooltips[TOOLTIP_LCONTROL], tooltips[TOOLTIP_LSHIFT_AND_LCONTROL], modName, imageName, aspectList,
                     tooltipStats });
         }
@@ -146,7 +150,7 @@ public class AdvItemPanelDumper extends WikiDumper {
         Map<ItemStack, String> originalNameMap = new HashMap<>(itemStacks.size());
         Utils.getEnglishTranslation(() -> {
             for (ItemStack stack : itemStacks) {
-                originalNameMap.put(stack, stack.getDisplayName());
+                originalNameMap.put(stack, GuiContainerManager.itemDisplayNameShort(stack.copy()));
             }
         });
         return originalNameMap;

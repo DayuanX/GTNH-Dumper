@@ -96,3 +96,36 @@ tasks.named<RunMinecraftTask>("runClient").configure {
     dependsOn(functionalTest.jarTaskName)
     classpath(configurations.named(functionalTest.runtimeClasspathConfigurationName), tasks.named(functionalTest.jarTaskName))
 }
+
+val checkRecipeItemVariants by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Checks recipe item copies, count normalization and structural NBT identity."
+    classpath(functionalTest.runtimeClasspath, sourceSets.main.get().output, sourceSets.patchedMc.get().output)
+    mainClass.set("com.iouter.gtnhdumper.RecipeItemVariantsRegression")
+}
+
+tasks.check.configure {
+    dependsOn(checkRecipeItemVariants)
+}
+
+val checkCraftingGrid by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Checks shaped crafting coordinates, empty cells and input-order invariance."
+    classpath(functionalTest.runtimeClasspath, sourceSets.main.get().output, sourceSets.patchedMc.get().output)
+    mainClass.set("com.iouter.gtnhdumper.CraftingGridRegression")
+}
+
+tasks.check.configure {
+    dependsOn(checkCraftingGrid)
+}
+
+val checkExportWorldCleanup by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Checks export world cleanup isolation and redirected path rejection without launching Minecraft."
+    classpath(functionalTest.runtimeClasspath, sourceSets.main.get().output, sourceSets.patchedMc.get().output)
+    mainClass.set("com.iouter.gtnhdumper.automation.ExportWorldCleanupRegression")
+}
+
+tasks.check.configure {
+    dependsOn(checkExportWorldCleanup)
+}

@@ -9,6 +9,7 @@ import net.minecraft.item.ItemStack;
 import com.google.common.base.Objects;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 import com.iouter.gtnhdumper.common.utils.RecipeUtil;
 
 import codechicken.nei.recipe.GuiRecipeTab;
@@ -22,6 +23,32 @@ public abstract class BaseHandlerRecipe {
     private final JsonObject json = new JsonObject();
 
     public BaseHandlerRecipe(IRecipeHandler handler) {
+        if (RecipeItemVariants.isCollecting()) {
+            // Decoration failures must not prevent visiting the actual recipe storage.
+            try {
+                RecipeCatalysts.getRecipeCatalysts(handler)
+                    .forEach(RecipeItemVariants::capture);
+            } catch (Exception | LinkageError e) {
+                RecipeItemVariants.reportFailure(
+                    handler.getClass()
+                        .getName() + " catalysts",
+                    e);
+            }
+            try {
+                String overlay = handler instanceof TemplateRecipeHandler ? handler.getOverlayIdentifier() : null;
+                HandlerInfo info = GuiRecipeTab
+                    .getHandlerInfo(handler.getHandlerId(), Objects.firstNonNull(overlay, "null"));
+                if (info != null) RecipeItemVariants.capture(info.getItemStack());
+            } catch (Exception | LinkageError e) {
+                RecipeItemVariants.reportFailure(
+                    handler.getClass()
+                        .getName() + " marked item",
+                    e);
+            }
+            // Some adapters return raw ItemStacks; retain their normal serializer capture path.
+            GSON.toJsonTree(getRecipes(handler));
+            return;
+        }
         json.addProperty("name", handler.getRecipeName());
         JsonArray catalysts = new JsonArray();
 

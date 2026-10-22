@@ -108,8 +108,12 @@ public abstract class WikiDumper extends FilteredDataDumper {
 
     @Override
     public void dumpTo(File file) throws IOException {
+        dumpTo(file, getMode());
+    }
+
+    /** Explicit mode for unattended exports, independent of the NEI options screen. */
+    public void dumpTo(File file, int mode) throws IOException {
         Object dumpObject;
-        int mode = getMode();
         if (mode == 0) {
             dumpObject = getListJson(header(), dumpObject(0), getKeyStr());
         } else if (mode == 1) {
@@ -122,8 +126,6 @@ public abstract class WikiDumper extends FilteredDataDumper {
         }
         try (FileWriter writer = new FileWriter(file)) {
             GTNHDumper.GSON.toJson(dumpObject, writer);
-        } catch (IOException e) {
-            GTNHDumper.LOG.error(e);
         }
     }
 }

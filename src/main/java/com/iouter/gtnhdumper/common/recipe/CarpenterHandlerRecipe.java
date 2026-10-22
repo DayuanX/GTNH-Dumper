@@ -8,6 +8,7 @@ import net.minecraftforge.fluids.FluidStack;
 import com.iouter.gtnhdumper.common.recipe.base.BaseHandlerRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.BaseRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.RecipeFluid;
+import com.iouter.gtnhdumper.common.utils.RecipeUtil;
 import com.iouter.gtnhdumper.common.utils.Utils;
 
 import codechicken.nei.recipe.IRecipeHandler;
@@ -42,13 +43,14 @@ public class CarpenterHandlerRecipe extends BaseHandlerRecipe {
                     inputFluids.add(new RecipeFluid(fluid).withNBT(fluid));
                 }
             }
-            recipes.add(
-                new BaseRecipe(
-                    Utils.getRecipeItems(recipe.getIngredients()),
-                    inputFluids,
-                    Utils.getRecipeItems(recipe.getResult()),
-                    null,
-                    null));
+            // 木工机按列遍历且跳过空材料；固定映射到行优先九宫格，包装箱独立为I10。
+            ArrayList<Object> inputs = new ArrayList<>(java.util.Collections.nCopies(10, null));
+            for (codechicken.nei.PositionedStack stack : recipe.getIngredients()) {
+                int index = stack.relx == 78 && stack.rely == 6 ? 9 : (stack.rely - 6) / 18 * 3 + (stack.relx - 5) / 18;
+                if (index < 0 || index >= 10) throw new IllegalStateException("Unexpected carpenter input position");
+                inputs.set(index, RecipeUtil.getRecipeItems(stack));
+            }
+            recipes.add(new BaseRecipe(inputs, inputFluids, Utils.getRecipeItems(recipe.getResult()), null, null));
         }
         return recipes;
     }

@@ -29,14 +29,19 @@ import net.minecraft.util.EnumChatFormatting;
 
 import org.lwjgl.opengl.GL11;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.gtnewhorizons.angelica.glsm.GLStateManager;
 import com.iouter.gtnhdumper.CommonProxy;
 import com.iouter.gtnhdumper.GTNHDumper;
+import com.iouter.gtnhdumper.automation.ExportSession;
 import com.iouter.gtnhdumper.common.base.WikiDumper;
 import com.iouter.gtnhdumper.common.utils.AllItemStacks;
 import com.iouter.gtnhdumper.common.utils.DynamicTexture;
 import com.iouter.gtnhdumper.common.utils.FBOHelper;
 import com.iouter.gtnhdumper.common.utils.ModFilter;
+import com.iouter.gtnhdumper.common.utils.PngWriter;
+import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 import com.iouter.gtnhdumper.common.utils.Utils;
 
 import bartworks.system.material.BWMetaGeneratedOres;
@@ -55,6 +60,9 @@ public class ItemIconDumper extends WikiDumper {
     private static final Object2IntOpenHashMap<ItemStack> frameCountMap = new Object2IntOpenHashMap<>();
     private static final Object2IntOpenHashMap<ItemStack> dynamicSizeMap = new Object2IntOpenHashMap<>();
     private static final Map<Integer, FBOHelper> fbos = new HashMap<>();
+    private static JsonObject resume;
+    private static int resumedIcons;
+    private static final Map<String, Integer> unregisteredItems = new LinkedHashMap<>();
 
     public ItemIconDumper() {
         super("tools.dump.gtnhdumper.itemicon");
@@ -77,6 +85,49 @@ public class ItemIconDumper extends WikiDumper {
 
     @Override
     public Iterable<Object[]> dumpObject(int mode) {
+        long started = System.nanoTime();
+        int workers = Integer.getInteger("gtnhdumper.pngWorkers", 0);
+        PngWriter writer = new PngWriter(workers);
+        resumedIcons = 0;
+        unregisteredItems.clear();
+        resume = null;
+        File resumeFile = ExportSession.imageResume();
+        if (resumeFile != null) {
+            try {
+                resume = GTNHDumper.GSON.fromJson(
+                    new String(Files.readAllBytes(resumeFile.toPath()), java.nio.charset.StandardCharsets.UTF_8),
+                    JsonObject.class);
+            } catch (IOException error) {
+                throw new IllegalStateException("Could not load resume image manifest", error);
+            }
+        }
+        FBOHelper.setPngWriter(writer);
+        try (writer) {
+            return dumpIcons(mode);
+        } finally {
+            FBOHelper.setPngWriter(null);
+            Map<String, Object> metrics = new LinkedHashMap<>();
+            metrics.put("workers", workers);
+            metrics.put("maximumCompression", true);
+            metrics.put("writtenImages", writer.count());
+            metrics.put("resumedIcons", resumedIcons);
+            metrics.put("excludedUnregisteredItems", unregisteredItems);
+            metrics.put("wallNanos", System.nanoTime() - started);
+            metrics.put("encodingAndWriteTaskNanos", writer.encodeNanos());
+            try {
+                Files.write(
+                    ModFilter.current()
+                        .outputFile("icon-performance.json")
+                        .toPath(),
+                    GTNHDumper.GSON.toJson(metrics)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            } catch (IOException error) {
+                throw new IllegalStateException("Could not record icon export metrics", error);
+            }
+        }
+    }
+
+    private Iterable<Object[]> dumpIcons(int mode) {
         LinkedList<Object[]> list = new LinkedList<>();
         frameCountMap.clear();
         dynamicSizeMap.clear();
@@ -86,16 +137,74 @@ public class ItemIconDumper extends WikiDumper {
         Map<String, String> redirectMap = new LinkedHashMap<>();
         Set<String> itemNameSet = new HashSet<>();
         Set<String> baseIconKeys = new HashSet<>();
+        Map<String, ItemStack> rendered = new HashMap<>();
+        Map<String, JsonObject> reference = loadReferenceMetadata();
+        Map<String, String> missingReference = new LinkedHashMap<>();
+        int visited = 0;
 
         for (ItemStack stack : itemStacks) {
+            if (++visited % 1000 == 0) ExportSession.progress(
+                "itemicon: " + visited + "/" + itemStacks.size() + " stacks; " + rendered.size() + " distinct icons");
             if (Utils.isStackInvalid(stack)) continue;
+            // AdvItemPanelDumper also excludes unregistered display-only objects.
+            // They have no stable registry key and would otherwise overwrite icon_null.png.
+            if (GameData.getItemRegistry()
+                .getNameForObject(stack.getItem()) == null) {
+                String identity = stack.getItem()
+                    .getClass()
+                    .getName() + ":"
+                    + stack.getItemDamage();
+                unregisteredItems.merge(identity, 1, Integer::sum);
+                continue;
+            }
             if (usesBaseIcon(stack)) {
                 stack = getBaseIconStack(stack);
                 if (!baseIconKeys.add(Utils.getItemStackShortKey(stack))) continue;
             }
-            prepareRenderItem(stack, RenderItem.getInstance());
+            String iconName = getIconFileName(stack);
+            ItemStack previous = rendered.putIfAbsent(iconName, stack);
+            if (previous == null) {
+                if (reference == null) {
+                    ItemStack renderStack = stack.copy();
+                    // NBT copies may serialize map entries in a different order. Keep the
+                    // original identity's filename even when the renderer works on a copy.
+                    renderGeneralItem(
+                        renderStack,
+                        getFbo(SINGLE_FRAME_SIZE),
+                        RenderItem.getInstance(),
+                        iconName,
+                        getIconFileName(stack, true));
+                    if (frameCountMap.containsKey(renderStack))
+                        frameCountMap.put(stack, frameCountMap.getInt(renderStack));
+                    if (dynamicSizeMap.containsKey(renderStack))
+                        dynamicSizeMap.put(stack, dynamicSizeMap.getInt(renderStack));
+                } else {
+                    JsonObject metadata = reference.get(Utils.getItemStackShortKey(stack));
+                    if (metadata == null || !iconName.equals(
+                        metadata.get("iconName")
+                            .getAsString())) {
+                        missingReference.put(Utils.getItemStackShortKey(stack), iconName);
+                        continue;
+                    }
+                    if (metadata.has("frameCount") && !metadata.get("frameCount")
+                        .isJsonNull()) frameCountMap.put(
+                            stack,
+                            metadata.get("frameCount")
+                                .getAsInt());
+                    if (metadata.has("size") && !metadata.get("size")
+                        .isJsonNull()) dynamicSizeMap.put(
+                            stack,
+                            metadata.get("size")
+                                .getAsInt());
+                }
+            } else {
+                if (!new RecipeItemVariants.Key(previous).equals(new RecipeItemVariants.Key(stack)))
+                    throw new IllegalStateException("Different item identities share icon filename: " + iconName);
+                if (frameCountMap.containsKey(previous)) frameCountMap.put(stack, frameCountMap.getInt(previous));
+                if (dynamicSizeMap.containsKey(previous)) dynamicSizeMap.put(stack, dynamicSizeMap.getInt(previous));
+            }
             final String translatedName = EnumChatFormatting
-                .getTextWithoutFormattingCodes(GuiContainerManager.itemDisplayNameShort(stack));
+                .getTextWithoutFormattingCodes(GuiContainerManager.itemDisplayNameShort(stack.copy()));
             final String imageName = getIconFileName(stack);
             final String vaildFileName = Utils.replaceIllegalChars(translatedName);
             if (itemNameSet.add(vaildFileName)) {
@@ -112,6 +221,21 @@ public class ItemIconDumper extends WikiDumper {
                     getItemFrameCount(stack) });
         }
 
+        if (reference != null) {
+            try {
+                Files.write(
+                    ModFilter.current()
+                        .outputFile("image-mapping-diff.json")
+                        .toPath(),
+                    GTNHDumper.GSON.toJson(missingReference)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            } catch (IOException error) {
+                throw new IllegalStateException("Could not write image mapping comparison", error);
+            }
+            if (!missingReference.isEmpty()) throw new IllegalStateException(
+                missingReference.size() + " new/changed icon mappings; see image-mapping-diff.json");
+        }
+
         try (CSVPrinter printer = new CSVPrinter(
             Files.newBufferedWriter(
                 ModFilter.current()
@@ -126,6 +250,28 @@ public class ItemIconDumper extends WikiDumper {
         }
 
         return list;
+    }
+
+    private static Map<String, JsonObject> loadReferenceMetadata() {
+        File file = ExportSession.imageMetadata();
+        if (file == null) return null;
+        try {
+            JsonObject data = GTNHDumper.GSON.fromJson(
+                new String(Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.UTF_8),
+                JsonObject.class);
+            Map<String, JsonObject> reference = new HashMap<>();
+            for (JsonElement element : data.getAsJsonArray("shortKey")) {
+                JsonObject row = element.getAsJsonObject();
+                String key = row.get("shortKey")
+                    .getAsString();
+                JsonObject previous = reference.putIfAbsent(key, row);
+                if (previous != null && !previous.equals(row))
+                    throw new IllegalStateException("Conflicting reference image metadata: " + key);
+            }
+            return reference;
+        } catch (IOException error) {
+            throw new IllegalStateException("Could not load reference image metadata", error);
+        }
     }
 
     @Override
@@ -249,20 +395,89 @@ public class ItemIconDumper extends WikiDumper {
 
     public static void renderGeneralItem(ItemStack itemStack, FBOHelper fbo, RenderItem itemRenderer) {
         itemStack = getBaseIconStack(itemStack);
+        renderGeneralItem(itemStack, fbo, itemRenderer, getIconFileName(itemStack), getIconFileName(itemStack, true));
+    }
+
+    private static void renderGeneralItem(ItemStack itemStack, FBOHelper fbo, RenderItem itemRenderer,
+        String staticName, String dynamicName) {
         DynamicTexture dynamicTexture = new DynamicTexture(itemStack);
-        if (!getIconFileName(itemStack).contains("Botania:prismarine") && dynamicTexture.isDynamic()) {
-            renderDynamicItem(itemStack, itemRenderer, dynamicTexture);
+        boolean dynamic = !staticName.contains("Botania:prismarine") && dynamicTexture.isDynamic();
+        if (resumeItem(itemStack, dynamic, staticName, dynamicName)) return;
+        if (dynamic) {
+            renderDynamicItem(itemStack, itemRenderer, dynamicTexture, staticName, dynamicName);
             return;
         }
         BufferedImage image = renderItem(itemStack, fbo, itemRenderer, 1f, null);
         FBOHelper.saveToFile(
             ModFilter.current()
-                .outputFile("icons/" + getIconFileName(itemStack)),
+                .outputFile("icons/" + staticName),
             image);
         fbo.restoreTexture();
     }
 
+    private static boolean resumeItem(ItemStack stack, boolean dynamic, String name, String animation) {
+        if (resume == null) return false;
+        JsonObject images = resume.getAsJsonObject("images");
+        if (!images.has(name) || (dynamic && !images.has(animation))) return false;
+        com.google.gson.JsonArray dimensions = images.getAsJsonArray(name);
+        if (dimensions.get(0)
+            .getAsInt() != SINGLE_FRAME_SIZE
+            || dimensions.get(1)
+                .getAsInt() != SINGLE_FRAME_SIZE)
+            return false;
+        int size = 0;
+        int frames = 0;
+        if (dynamic) {
+            dimensions = images.getAsJsonArray(animation);
+            size = dimensions.get(1)
+                .getAsInt();
+            int width = dimensions.get(0)
+                .getAsInt();
+            if (size <= 0 || width < size || width % size != 0) return false;
+            frames = width / size;
+        }
+        // Link only fully validated files; missing pairs are rendered into new files.
+        linkResumedImage(name);
+        if (dynamic) {
+            linkResumedImage(animation);
+            frameCountMap.put(stack, frames);
+            dynamicSizeMap.put(stack, size);
+        }
+        resumedIcons++;
+        return true;
+    }
+
+    private static void linkResumedImage(String name) {
+        java.nio.file.Path source = new File(
+            resume.get("directory")
+                .getAsString(),
+            name).toPath();
+        java.nio.file.Path target = ModFilter.current()
+            .outputFile("icons/" + name)
+            .toPath();
+        try {
+            Files.createDirectories(target.getParent());
+            try {
+                Files.createLink(target, source);
+            } catch (IOException unsupportedLink) {
+                Files.copy(source, target);
+            }
+        } catch (IOException error) {
+            throw new IllegalStateException("Could not reuse PNG: " + name, error);
+        }
+    }
+
     public static void renderDynamicItem(ItemStack itemStack, RenderItem itemRenderer, DynamicTexture dynamicTexture) {
+        renderDynamicItem(
+            itemStack,
+            itemRenderer,
+            dynamicTexture,
+            getIconFileName(itemStack),
+            getIconFileName(itemStack, true));
+    }
+
+    private static void renderDynamicItem(ItemStack itemStack, RenderItem itemRenderer, DynamicTexture dynamicTexture,
+        String staticName, String dynamicName) {
         int frameCount = dynamicTexture.lcm;
         boolean is3dBlockItem = is3dBlockItem(itemStack);
         FBOHelper dynamicFbo = getFbo(is3dBlockItem ? SINGLE_FRAME_SIZE : getDynamicTextureSize(dynamicTexture));
@@ -283,11 +498,11 @@ public class ItemIconDumper extends WikiDumper {
         dynamicSizeMap.put(itemStack, image.getHeight());
         FBOHelper.saveToFile(
             ModFilter.current()
-                .outputFile("icons/" + getIconFileName(itemStack)),
+                .outputFile("icons/" + staticName),
             resizeImage(images[0], SINGLE_FRAME_SIZE));
         FBOHelper.saveToFile(
             ModFilter.current()
-                .outputFile("icons/" + getIconFileName(itemStack, true)),
+                .outputFile("icons/" + dynamicName),
             image);
         dynamicFbo.restoreTexture();
     }

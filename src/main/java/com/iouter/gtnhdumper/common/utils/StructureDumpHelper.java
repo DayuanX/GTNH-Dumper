@@ -33,7 +33,7 @@ public class StructureDumpHelper {
 
     // Copied from BlockRender6343
     private static final Field occupiedSpacesField;
-    private static final MethodHandle DOT_GETTER, HINT_FALLBACK;
+    private static final MethodHandle DOT_GETTER;
     private static final String HATCH_ELEMENT;
 
     static {
@@ -54,10 +54,8 @@ public class StructureDumpHelper {
                 .unreflectGetter(ReflectionHelper.findField(hatchEle.getClass(), "this$0"));
             MethodHandle hint = lookup.unreflectGetter(ReflectionHelper.findField(HatchElementBuilder.class, "mHint"));
             DOT_GETTER = MethodHandles.filterReturnValue(hatchBuilder, hint);
-            HINT_FALLBACK = lookup
-                .unreflect(ReflectionHelper.findMethod(hatchEle.getClass(), null, new String[] { "getHint" }));
         } catch (Exception e) {
-            throw new RuntimeException("无法通过反射获取 occupiedSpaces 字段，请检查 StructureDefinition 源码是否变更", e);
+            throw new RuntimeException("无法读取结构占用位置或仓室提示字段，请检查 StructureDefinition 和 HatchElementBuilder", e);
         }
     }
 

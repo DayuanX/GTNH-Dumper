@@ -7,6 +7,7 @@ import java.util.Map;
 
 import net.minecraft.item.ItemStack;
 
+import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 import com.iouter.gtnhdumper.common.utils.Utils;
 
 public class RecipeItem {
@@ -18,6 +19,9 @@ public class RecipeItem {
     public Object chance;
     public String nbt;
     public List<String> tooltip;
+    public Integer expectedAmount;
+    public String meteorRole;
+    public List<String> reagentRequirements;
 
     public RecipeItem(String key, long amount) {
         this.key = key;
@@ -29,6 +33,7 @@ public class RecipeItem {
     }
 
     public RecipeItem(ItemStack stack) {
+        RecipeItemVariants.capture(stack);
         if (stack != null) {
             this.key = Utils.getItemKey(stack);
             int amount = stack.stackSize;

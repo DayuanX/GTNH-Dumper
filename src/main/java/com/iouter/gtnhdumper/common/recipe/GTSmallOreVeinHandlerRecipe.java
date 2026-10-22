@@ -9,6 +9,7 @@ import net.minecraft.item.ItemStack;
 
 import com.iouter.gtnhdumper.common.recipe.base.BaseHandlerRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.OreWorldgenRecipe;
+import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 import com.iouter.gtnhdumper.common.utils.WorldgenRecipeUtil;
 
 import codechicken.nei.recipe.IRecipeHandler;
@@ -32,41 +33,48 @@ public class GTSmallOreVeinHandlerRecipe extends BaseHandlerRecipe {
         veins.sort(Comparator.comparing(vein -> vein.oreGenName));
         List<SmallOreRecipe> recipes = new ArrayList<>();
         for (OreSmallWrapper vein : veins) {
-            List<String> dims = WorldgenRecipeUtil.sortDimensions(vein.enabledDims);
-            List<ItemStack> ores = new ArrayList<>();
-            List<ItemStack> dusts = new ArrayList<>();
-            String localizedName;
-            try (OreInfo<IOreMaterial> info = OreInfo.getNewInfo()) {
-                info.material = vein.material;
-                info.isSmall = true;
-                localizedName = OreManager.getLocalizedName(info);
-                collectVariants(info, WorldgenRecipeUtil.getStoneTypes(dims), ores, dusts);
-                if (ores.isEmpty()) {
-                    // Match NEI's fallback when no enabled dimension provides a supported stone.
-                    collectVariants(info, StoneType.STONE_TYPES, ores, dusts);
+            try {
+                List<String> dims = WorldgenRecipeUtil.sortDimensions(vein.enabledDims);
+                List<ItemStack> ores = new ArrayList<>();
+                List<ItemStack> dusts = new ArrayList<>();
+                String localizedName;
+                try (OreInfo<IOreMaterial> info = OreInfo.getNewInfo()) {
+                    info.material = vein.material;
+                    info.isSmall = true;
+                    localizedName = OreManager.getLocalizedName(info);
+                    collectVariants(info, WorldgenRecipeUtil.getStoneTypes(dims), ores, dusts);
+                    if (ores.isEmpty()) {
+                        // Match NEI's fallback when no enabled dimension provides a supported stone.
+                        collectVariants(info, StoneType.STONE_TYPES, ores, dusts);
+                    }
                 }
-            }
 
-            ArrayList<Object> outputItems = new ArrayList<>();
-            WorldgenRecipeUtil.addItemAlternatives(outputItems, ores);
-            ArrayList<Object> otherItems = new ArrayList<>();
-            List<ItemStack> drops = GT5OreSmallHelper.ORE_MAT_TO_DROPS.get(vein.material);
-            if (drops != null && !drops.isEmpty()) {
-                // NEI substitutes stone-specific dusts for the first potential drop.
-                WorldgenRecipeUtil
-                    .addItemAlternatives(otherItems, dusts.isEmpty() ? Collections.singletonList(drops.get(0)) : dusts);
-                for (int i = 1; i < drops.size(); i++) {
-                    WorldgenRecipeUtil.addItemAlternatives(otherItems, Collections.singletonList(drops.get(i)));
+                ArrayList<Object> outputItems = new ArrayList<>();
+                WorldgenRecipeUtil.addItemAlternatives(outputItems, ores);
+                ArrayList<Object> otherItems = new ArrayList<>();
+                List<ItemStack> drops = GT5OreSmallHelper.ORE_MAT_TO_DROPS.get(vein.material);
+                if (drops != null && !drops.isEmpty()) {
+                    // NEI substitutes stone-specific dusts for the first potential drop.
+                    WorldgenRecipeUtil.addItemAlternatives(
+                        otherItems,
+                        dusts.isEmpty() ? Collections.singletonList(drops.get(0)) : dusts);
+                    for (int i = 1; i < drops.size(); i++) {
+                        WorldgenRecipeUtil.addItemAlternatives(otherItems, Collections.singletonList(drops.get(i)));
+                    }
                 }
+                recipes.add(
+                    new SmallOreRecipe(
+                        vein,
+                        localizedName,
+                        dims,
+                        WorldgenRecipeUtil.getDimensionInputs(dims),
+                        outputItems,
+                        otherItems));
+
+            } catch (RuntimeException | LinkageError e) {
+                if (!RecipeItemVariants.isCollecting()) throw e;
+                RecipeItemVariants.reportFailure("GTSmallOreVeinHandlerRecipe.java entry", e);
             }
-            recipes.add(
-                new SmallOreRecipe(
-                    vein,
-                    localizedName,
-                    dims,
-                    WorldgenRecipeUtil.getDimensionInputs(dims),
-                    outputItems,
-                    otherItems));
         }
         return recipes;
     }

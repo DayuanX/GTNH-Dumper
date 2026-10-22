@@ -9,6 +9,7 @@ import java.util.TreeMap;
 
 import com.iouter.gtnhdumper.common.recipe.base.BaseHandlerRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.OreWorldgenRecipe;
+import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 import com.iouter.gtnhdumper.common.utils.WorldgenRecipeUtil;
 
 import codechicken.nei.recipe.IRecipeHandler;
@@ -30,14 +31,20 @@ public class GTOreVeinHandlerRecipe extends BaseHandlerRecipe {
         veins.sort(Comparator.comparing(vein -> vein.veinName));
         List<OreVeinRecipe> recipes = new ArrayList<>();
         for (OreLayerWrapper vein : veins) {
-            List<String> dims = WorldgenRecipeUtil.sortDimensions(vein.abbrDimNames);
-            Set<StoneType> stoneTypes = WorldgenRecipeUtil.getStoneTypes(dims);
-            ArrayList<Object> outputItems = new ArrayList<>();
-            // Preserve all four slots, even if one layer has no available ore variants.
-            for (int layer = 0; layer < vein.ores.length; layer++) {
-                outputItems.add(WorldgenRecipeUtil.getItemAlternatives(vein.getVeinLayerOre(layer, stoneTypes)));
+            try {
+                List<String> dims = WorldgenRecipeUtil.sortDimensions(vein.abbrDimNames);
+                Set<StoneType> stoneTypes = WorldgenRecipeUtil.getStoneTypes(dims);
+                ArrayList<Object> outputItems = new ArrayList<>();
+                // Preserve all four slots, even if one layer has no available ore variants.
+                for (int layer = 0; layer < vein.ores.length; layer++) {
+                    outputItems.add(WorldgenRecipeUtil.getItemAlternatives(vein.getVeinLayerOre(layer, stoneTypes)));
+                }
+                recipes.add(new OreVeinRecipe(vein, dims, WorldgenRecipeUtil.getDimensionInputs(dims), outputItems));
+
+            } catch (RuntimeException | LinkageError e) {
+                if (!RecipeItemVariants.isCollecting()) throw e;
+                RecipeItemVariants.reportFailure("GTOreVeinHandlerRecipe.java entry", e);
             }
-            recipes.add(new OreVeinRecipe(vein, dims, WorldgenRecipeUtil.getDimensionInputs(dims), outputItems));
         }
         return recipes;
     }

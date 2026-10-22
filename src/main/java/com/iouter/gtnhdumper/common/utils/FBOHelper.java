@@ -37,7 +37,13 @@ import com.iouter.gtnhdumper.GTNHDumper;
  * <a href="https://github.com/Snownee/Item-Render-Dark/blob/master/src/main/java/itemrender/rendering/FBOHelper.java
  * ">Item-Render-Rebirth</a>
  */
-public final class FBOHelper {
+public final class FBOHelper implements AutoCloseable {
+
+    private static PngWriter pngWriter;
+
+    public static void setPngWriter(PngWriter writer) {
+        pngWriter = writer;
+    }
 
     private int renderTextureSize = 128;
     private int framebufferID = -1;
@@ -157,6 +163,10 @@ public final class FBOHelper {
     }
 
     public static void saveToFile(File file, BufferedImage image) {
+        if (pngWriter != null) {
+            pngWriter.write(file, image);
+            return;
+        }
         File parent = file.getParentFile();
         if (parent != null) {
             parent.mkdirs();
@@ -183,7 +193,7 @@ public final class FBOHelper {
             if (types != null && types.length > 0) {
                 param.setCompressionType(types[0]);
             }
-            // PNG 无损：0 = 最大压缩（最慢），导出为离线操作可接受
+            // PNG 无损：0 = 最大压缩；导出统一保留该设置。
             param.setCompressionQuality(0f);
         }
         try (ImageOutputStream ios = ImageIO.createImageOutputStream(file)) {
@@ -263,9 +273,24 @@ public final class FBOHelper {
         EXTFramebufferObject.glBindFramebufferEXT(EXTFramebufferObject.GL_FRAMEBUFFER_EXT, currentFramebuffer);
     }
 
+    /** 在创建该 FBO 的 GL 线程释放资源；调用方先结束捕获并恢复绑定。 */
+    @Override
+    public void close() {
+        deleteFramebuffer();
+    }
+
     private void deleteFramebuffer() {
-        EXTFramebufferObject.glDeleteFramebuffersEXT(framebufferID);
-        GLStateManager.glDeleteTextures(textureID);
-        EXTFramebufferObject.glDeleteRenderbuffersEXT(depthbufferID);
+        if (framebufferID != -1) {
+            EXTFramebufferObject.glDeleteFramebuffersEXT(framebufferID);
+            framebufferID = -1;
+        }
+        if (textureID != -1) {
+            GLStateManager.glDeleteTextures(textureID);
+            textureID = -1;
+        }
+        if (depthbufferID != -1) {
+            EXTFramebufferObject.glDeleteRenderbuffersEXT(depthbufferID);
+            depthbufferID = -1;
+        }
     }
 }

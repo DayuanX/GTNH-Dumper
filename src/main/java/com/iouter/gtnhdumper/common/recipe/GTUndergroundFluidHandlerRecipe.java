@@ -12,6 +12,7 @@ import net.minecraftforge.fluids.FluidRegistry;
 import com.iouter.gtnhdumper.common.recipe.base.BaseHandlerRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.BaseRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.RecipeFluid;
+import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 import com.iouter.gtnhdumper.common.utils.WorldgenRecipeUtil;
 
 import codechicken.nei.recipe.IRecipeHandler;
@@ -41,15 +42,21 @@ public class GTUndergroundFluidHandlerRecipe extends BaseHandlerRecipe {
                     .thenComparingInt(deposit -> deposit.maxAmount)
                     .thenComparingInt(deposit -> deposit.chance));
             for (UndergroundFluidWrapper deposit : deposits) {
-                ArrayList<RecipeFluid> outputFluids = new ArrayList<>();
-                // This identifies the fluid; deposit amounts and generation chance are metadata.
-                outputFluids.add(new RecipeFluid("fluid." + entry.getKey(), 0));
-                recipes.add(
-                    new UndergroundFluidRecipe(
-                        entry.getKey(),
-                        deposit,
-                        WorldgenRecipeUtil.getDimensionInputs(Collections.singletonList(deposit.dimension)),
-                        outputFluids));
+                try {
+                    ArrayList<RecipeFluid> outputFluids = new ArrayList<>();
+                    // This identifies the fluid; deposit amounts and generation chance are metadata.
+                    outputFluids.add(new RecipeFluid("fluid." + entry.getKey(), 0));
+                    recipes.add(
+                        new UndergroundFluidRecipe(
+                            entry.getKey(),
+                            deposit,
+                            WorldgenRecipeUtil.getDimensionInputs(Collections.singletonList(deposit.dimension)),
+                            outputFluids));
+
+                } catch (RuntimeException | LinkageError e) {
+                    if (!RecipeItemVariants.isCollecting()) throw e;
+                    RecipeItemVariants.reportFailure("GTUndergroundFluidHandlerRecipe.java entry", e);
+                }
             }
         }
         return recipes;

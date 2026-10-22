@@ -28,7 +28,10 @@ public class GasSiphonHandlerRecipe extends BaseHandlerRecipe {
                     new GasSiphonRecipe().setFluid(innerEntry.getValue())
                         .setPlanet(entry.getKey())
                         .setDepth(innerEntry.getKey())
-                        .setOutputAmount(innerEntry.getValue().amount));
+                        .setOutputAmount(innerEntry.getValue().amount)
+                        .setBaseRatePerSecond((long) innerEntry.getValue().amount * 2)
+                        .setEut(GasSiphonRecipes.calculateEUt(innerEntry.getKey(), entry.getValue().tier))
+                        .setPlanetName(net.minecraft.util.StatCollector.translateToLocal(entry.getKey())));
             }
         }
         return recipes;
@@ -42,5 +45,9 @@ public class GasSiphonHandlerRecipe extends BaseHandlerRecipe {
         private String planet;
         private int depth;
         private int outputAmount;
+        // 注册表保存每10 tick产量；NEI基础速率使用L/s，即注册量的两倍。
+        private long baseRatePerSecond;
+        private int eut;
+        private String planetName;
     }
 }

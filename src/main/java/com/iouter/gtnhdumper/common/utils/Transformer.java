@@ -8,6 +8,10 @@ import java.util.Map;
 import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
 
+import com.gtnewhorizon.cropsnh.api.IBreedingRequirement;
+import com.gtnewhorizon.cropsnh.api.ICropCard;
+import com.gtnewhorizon.cropsnh.api.ICropMutation;
+import com.iouter.gtnhdumper.CommonProxy;
 import com.iouter.gtnhdumper.common.recipe.GTDefaultHandlerRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.RecipeFluid;
 import com.iouter.gtnhdumper.common.recipe.base.RecipeItem;
@@ -29,6 +33,31 @@ public class Transformer {
         if (src.mHidden) {
             return null;
         }
+        // 未注册输入无法在游戏物品库中取得；整方排除，不能删除输入后留下免费产物。
+        if (src.mInputs != null) for (ItemStack input : src.mInputs) {
+            if (input != null && net.minecraft.item.Item.itemRegistry.getNameForObject(input.getItem()) == null) {
+                String identity = input.getItem()
+                    .getClass()
+                    .getName() + ":"
+                    + codechicken.lib.inventory.InventoryUtils.actualDamage(input);
+                RecipeCoverage.unsupported(
+                    "unregisteredGTInput:" + src.getRecipeCategory().recipeMap.unlocalizedName + ":" + identity,
+                    "Excluded whole recipe: input has no registry name; item=" + identity
+                        + "; unlocalizedName="
+                        + input.getItem()
+                            .getUnlocalizedName()
+                        + "; nbt="
+                        + Utils.getItemNBT(input));
+                return null;
+            }
+        }
+        // Keep the original concrete inputs too, before GT expands/unifies alternatives.
+        if (src.mInputs != null) for (ItemStack stack : src.mInputs) RecipeItemVariants.capture(stack);
+        if (src.mOutputs != null) for (ItemStack stack : src.mOutputs) RecipeItemVariants.captureExactOutput(stack);
+        if (src.mSpecialItems instanceof ItemStack stack) RecipeItemVariants.capture(stack);
+        if (src.mSpecialItems instanceof ItemStack[]stacks) {
+            for (ItemStack stack : stacks) RecipeItemVariants.capture(stack);
+        }
         ArrayList<Object> inputItems = getInputItems(src);
         ArrayList<RecipeFluid> inputFluids = getInputFluids(src);
         ArrayList<Object> outputItems = getOutputItems(src);
@@ -36,6 +65,10 @@ public class Transformer {
         ArrayList<Object> otherItems = new ArrayList<>();
         if (src.mSpecialItems instanceof ItemStack temp) {
             otherItems.add(new RecipeItem(temp));
+        } else if (src.mSpecialItems instanceof ItemStack[]stacks) {
+            // GT特殊槽的数组是同一槽位的候选物品；装配线的研究闪存也使用此形式。
+            Object candidates = RecipeUtil.getRecipeItems(stacks);
+            if (candidates != null) otherItems.add(candidates);
         }
         if (otherItems.isEmpty()) otherItems = null;
         IRecipeMetadataStorage metadataStorage = src.getMetadataStorage();
@@ -49,11 +82,23 @@ public class Transformer {
                     Object value = meta.getValue();
                     String key = idField.get(meta.getKey())
                         .toString();
-                    metadata.put(key, value);
+                    metadata.put(key, CommonProxy.isCropsNHLoaded ? cropMetadata(value) : value);
                 } catch (Exception ignored) {}
             }
         } catch (Exception e) {
             metadata = null;
+        }
+        // 与GT燃料格式器一致：特殊值乘流体量或容器容量，非流体回退1000。
+        if (src.getRecipeCategory().recipeMap.getFrontend()
+            .getNEIProperties().neiSpecialInfoFormatter instanceof gregtech.nei.formatter.FuelSpecialValueFormatter) {
+            int amount = src.mFluidInputs.length > 0 ? src.mFluidInputs[0].amount : 0;
+            if (amount == 0) for (ItemStack input : src.mInputs) {
+                amount = net.minecraftforge.fluids.FluidContainerRegistry.getContainerCapacity(input);
+                if (amount > 0) break;
+            }
+            if (amount == 0) amount = 1000;
+            if (metadata == null) metadata = new LinkedHashMap<>();
+            metadata.put("fuelEnergyEU", (long) src.mSpecialValue * amount);
         }
         if (metadata != null && metadata.isEmpty()) metadata = null;
         return new GTDefaultHandlerRecipe.GTDumpedRecipe(
@@ -65,7 +110,45 @@ public class Transformer {
             src.mEUt,
             src.mDuration,
             src.mSpecialValue,
-            metadata).withSourceMod(GTDefaultHandlerRecipe.originalOwner(src));
+            metadata).withSourceMod(GTDefaultHandlerRecipe.originalOwner(src))
+                .withDisplayData(src);
+    }
+
+    /** CropsNH metadata stores live registry objects; export identities and breeding rules, not runtime state. */
+    private static Object cropMetadata(Object value) {
+        if (value instanceof ICropCard crop) return crop.getId();
+        if (value instanceof ICropMutation mutation) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put(
+                "output",
+                mutation.getOutput()
+                    .getId());
+            data.put(
+                "parents",
+                mutation.getParents()
+                    .stream()
+                    .map(ICropCard::getId)
+                    .toArray(String[]::new));
+            data.put(
+                "requirements",
+                mutation.getRequirements()
+                    .stream()
+                    .map(IBreedingRequirement::getDescription)
+                    .toArray(String[]::new));
+            data.put(
+                "subSoils",
+                RecipeUtil.getRecipeItems(
+                    mutation.getSubSoilsForNEI(false)
+                        .toArray(new ItemStack[0])));
+            data.put(
+                "catalysts",
+                mutation.getBreedingMachineCatalystsForNEI(false)
+                    .stream()
+                    .map(stacks -> RecipeUtil.getRecipeItems(stacks.toArray(new ItemStack[0])))
+                    .toArray());
+            return data;
+        }
+        return value;
     }
 
     public static ArrayList<Object> getInputItems(GTRecipe gtRecipe) {
@@ -94,8 +177,10 @@ public class Transformer {
 
     public static ArrayList<Object> getOutputItems(GTRecipe gtRecipe) {
         ArrayList<Object> outputItems = new ArrayList<>();
-        for (int i = 0; i < gtRecipe.mOutputs.length; i++) {
-            outputItems.add(new RecipeItem(gtRecipe.mOutputs[i]).withChance(gtRecipe.getOutputChance(i)));
+        ItemStack[] stacks = gtRecipe.getRecipeCategory().recipeMap.getFrontend()
+            .getNEIProperties().itemOutputsGetter.apply(gtRecipe);
+        for (int i = 0; i < stacks.length; i++) {
+            if (stacks[i] != null) outputItems.add(new RecipeItem(stacks[i]).withChance(gtRecipe.getOutputChance(i)));
         }
         if (outputItems.isEmpty()) return null;
         return outputItems;

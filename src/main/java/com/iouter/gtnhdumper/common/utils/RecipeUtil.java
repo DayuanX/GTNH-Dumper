@@ -25,9 +25,11 @@ public class RecipeUtil {
         if (stacks == null || stacks.length == 0) {
             return null;
         }
+        for (ItemStack stack : stacks) RecipeItemVariants.capture(stack);
         stacks = Arrays.stream(stacks)
             .filter(Objects::nonNull)
             .toArray(ItemStack[]::new);
+        if (stacks.length == 0) return null;
         if (stacks.length == 1) {
             return new RecipeItem(stacks[0]).withChance(chance);
         }

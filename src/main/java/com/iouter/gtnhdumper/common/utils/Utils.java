@@ -185,22 +185,7 @@ public class Utils {
     }
 
     public static int getCraftingSerial(int x, int y) {
-        int serialY = getCraftingSerialY(y);
-        return switch (x) {
-            case 25 -> 1 + serialY;
-            case 43 -> 2 + serialY;
-            case 61 -> 3 + serialY;
-            default -> -1;
-        };
-    }
-
-    private static int getCraftingSerialY(int y) {
-        return switch (y) {
-            case 6 -> 0;
-            case 24 -> 3;
-            case 42 -> 6;
-            default -> -1;
-        };
+        return com.iouter.gtnhdumper.common.recipe.ShapedCraftingHandlerRecipe.cellNumber(x, y);
     }
 
     public static String getAfterLastChar(String input, char c) {
@@ -369,10 +354,12 @@ public class Utils {
         languageManager.setCurrentLanguage(new Language("en_US", "US", "English (United States)", false));
         languageManager.onResourceManagerReload(minecraft.getResourceManager());
 
-        action.run();
-
-        languageManager.setCurrentLanguage(currentLanguage);
-        languageManager.onResourceManagerReload(minecraft.getResourceManager());
+        try {
+            action.run();
+        } finally {
+            languageManager.setCurrentLanguage(currentLanguage);
+            languageManager.onResourceManagerReload(minecraft.getResourceManager());
+        }
     }
 
     // Copy from GregTech

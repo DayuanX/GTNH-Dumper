@@ -12,6 +12,7 @@ import com.emoniph.witchery.integration.NEICauldronRecipeHandler;
 import com.iouter.gtnhdumper.common.recipe.base.BaseHandlerRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.BaseRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.RecipeItem;
+import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 
 import codechicken.nei.recipe.IRecipeHandler;
 
@@ -29,23 +30,35 @@ public class WitcheryCauldronHandlerRecipe extends BaseHandlerRecipe {
 
         List<CauldronRecipe> recipes = new ArrayList<>();
         for (BrewActionRitualRecipe ritual : WitcheryBrewRegistry.INSTANCE.getRecipes()) {
-            for (BrewActionRitualRecipe.Recipe recipe : ritual.getExpandedRecipes()) {
-                ArrayList<Object> inputItems = new ArrayList<>();
-                Arrays.stream(recipe.ingredients)
-                    .filter(input -> input != null)
-                    .map(RecipeItem::new)
-                    .forEach(inputItems::add);
+            try {
+                for (BrewActionRitualRecipe.Recipe recipe : ritual.getExpandedRecipes()) {
+                    try {
+                        ArrayList<Object> inputItems = new ArrayList<>();
+                        Arrays.stream(recipe.ingredients)
+                            .filter(input -> input != null)
+                            .map(RecipeItem::new)
+                            .forEach(inputItems::add);
 
-                ArrayList<Object> outputItems = new ArrayList<>();
-                outputItems.add(new RecipeItem(recipe.result));
+                        ArrayList<Object> outputItems = new ArrayList<>();
+                        outputItems.add(new RecipeItem(recipe.result));
 
-                int altarPower = Arrays.stream(recipe.ingredients)
-                    .filter(input -> input != null)
-                    .map(WitcheryBrewRegistry.INSTANCE::getActionForItemStack)
-                    .filter(action -> action != null)
-                    .mapToInt(WitcheryCauldronHandlerRecipe::getAltarPower)
-                    .sum();
-                recipes.add(new CauldronRecipe(inputItems, outputItems, altarPower));
+                        int altarPower = Arrays.stream(recipe.ingredients)
+                            .filter(input -> input != null)
+                            .map(WitcheryBrewRegistry.INSTANCE::getActionForItemStack)
+                            .filter(action -> action != null)
+                            .mapToInt(WitcheryCauldronHandlerRecipe::getAltarPower)
+                            .sum();
+                        recipes.add(new CauldronRecipe(inputItems, outputItems, altarPower));
+
+                    } catch (RuntimeException | LinkageError e) {
+                        if (!RecipeItemVariants.isCollecting()) throw e;
+                        RecipeItemVariants.reportFailure("WitcheryCauldronHandlerRecipe.java entry", e);
+                    }
+                }
+
+            } catch (RuntimeException | LinkageError e) {
+                if (!RecipeItemVariants.isCollecting()) throw e;
+                RecipeItemVariants.reportFailure("WitcheryCauldronHandlerRecipe.java entry", e);
             }
         }
         return recipes;

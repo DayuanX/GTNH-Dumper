@@ -18,24 +18,27 @@ import com.google.gson.JsonObject;
 import com.iouter.gtnhdumper.GTNHDumper;
 import com.iouter.gtnhdumper.common.recipe.base.RecipeFluid;
 import com.iouter.gtnhdumper.common.recipe.base.RecipeItem;
+import com.iouter.gtnhdumper.common.utils.ModFilter;
+import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 
 /** Adds KubaTech's final Extreme Entity Crusher recipe map to the normal recipe dump. */
 public final class EECRecipeDumper {
 
     public static final String RECIPE_NAME = "Extreme Entity Crusher";
-    private static final File OUTPUT_FILE = new File("dumps/recipes/kubatech/ExtremeEntityCrusher.json");
 
     private EECRecipeDumper() {}
 
     public static void dump() throws Exception {
-        File parent = OUTPUT_FILE.getParentFile();
+        File outputFile = ModFilter.current()
+            .outputFile("recipes/kubatech/ExtremeEntityCrusher.json");
+        File parent = outputFile.getParentFile();
         if (parent != null && !parent.exists()) {
             parent.mkdirs();
         }
-        try (FileWriter writer = new FileWriter(OUTPUT_FILE)) {
+        try (FileWriter writer = new FileWriter(outputFile)) {
             GTNHDumper.GSON.toJson(build(), writer);
         }
-        GTNHDumper.info("已写入：" + OUTPUT_FILE.getAbsolutePath());
+        GTNHDumper.info("已写入：" + outputFile.getAbsolutePath());
     }
 
     static JsonObject build() throws Exception {
@@ -50,48 +53,54 @@ public final class EECRecipeDumper {
         }
 
         for (Map.Entry<String, Object> entry : sortedRecipes.entrySet()) {
-            String entityName = entry.getKey();
-            Object eecRecipe = entry.getValue();
-            Object mobRecipe = field(eecRecipe, "recipe");
+            try {
+                String entityName = entry.getKey();
+                Object eecRecipe = entry.getValue();
+                Object mobRecipe = field(eecRecipe, "recipe");
 
-            ArrayList<Object> inputItems = new ArrayList<>();
-            inputItems.add(new RecipeItem(getPoweredSpawner(entityName)));
-            ArrayList<Object> outputItems = new ArrayList<>();
-            ArrayList<Object> otherItems = new ArrayList<>();
-            for (Object drop : (List<?>) field(eecRecipe, "mOutputs")) {
-                ItemStack stack = ((ItemStack) field(drop, "stack")).copy();
-                Object damages = field(drop, "damages");
-                if (stack.isItemStackDamageable() && damages instanceof Map && ((Map<?, ?>) damages).size() > 1) {
-                    stack.setItemDamage(0);
+                ArrayList<Object> inputItems = new ArrayList<>();
+                inputItems.add(new RecipeItem(getPoweredSpawner(entityName)));
+                ArrayList<Object> outputItems = new ArrayList<>();
+                ArrayList<Object> otherItems = new ArrayList<>();
+                for (Object drop : (List<?>) field(eecRecipe, "mOutputs")) {
+                    ItemStack stack = ((ItemStack) field(drop, "stack")).copy();
+                    Object damages = field(drop, "damages");
+                    if (stack.isItemStackDamageable() && damages instanceof Map && ((Map<?, ?>) damages).size() > 1) {
+                        stack.setItemDamage(0);
+                    }
+                    int chance = ((Number) field(drop, "chance")).intValue();
+                    RecipeItem item = new RecipeItem(stack);
+                    Object normalChance = getChanceModifier(drop, "NormalChance");
+                    if (normalChance != null) {
+                        chance = (int) (((Number) field(normalChance, "chance")).doubleValue() * 100d);
+                    }
+                    if ((Boolean) field(drop, "playerOnly")) {
+                        chance = Math.max(1, (int) (chance * playerOnlyModifier));
+                    }
+                    item.withChance(chance);
+                    if (getChanceModifier(drop, "DropsOnlyWithEnchant") != null) {
+                        otherItems.add(item);
+                    } else {
+                        outputItems.add(item);
+                    }
                 }
-                int chance = ((Number) field(drop, "chance")).intValue();
-                RecipeItem item = new RecipeItem(stack);
-                Object normalChance = getChanceModifier(drop, "NormalChance");
-                if (normalChance != null) {
-                    chance = (int) (((Number) field(normalChance, "chance")).doubleValue() * 100d);
-                }
-                if ((Boolean) field(drop, "playerOnly")) {
-                    chance = Math.max(1, (int) (chance * playerOnlyModifier));
-                }
-                item.withChance(chance);
-                if (getChanceModifier(drop, "DropsOnlyWithEnchant") != null) {
-                    otherItems.add(item);
-                } else {
-                    outputItems.add(item);
-                }
+                recipes.add(
+                    new EECRecipe(
+                        inputItems,
+                        outputItems,
+                        otherItems,
+                        ((Number) field(eecRecipe, "mEUt")).intValue(),
+                        ((Number) field(eecRecipe, "mDuration")).intValue(),
+                        ((Number) field(mobRecipe, "maxEntityHealth")).floatValue(),
+                        entityName,
+                        getInfernalStatus(
+                            (Boolean) field(mobRecipe, "alwaysinfernal"),
+                            (Boolean) field(mobRecipe, "infernalityAllowed"))));
+
+            } catch (Exception | LinkageError e) {
+                if (!RecipeItemVariants.isCollecting()) throw e;
+                RecipeItemVariants.reportFailure("EECRecipeDumper.java entry", e);
             }
-            recipes.add(
-                new EECRecipe(
-                    inputItems,
-                    outputItems,
-                    otherItems,
-                    ((Number) field(eecRecipe, "mEUt")).intValue(),
-                    ((Number) field(eecRecipe, "mDuration")).intValue(),
-                    ((Number) field(mobRecipe, "maxEntityHealth")).floatValue(),
-                    entityName,
-                    getInfernalStatus(
-                        (Boolean) field(mobRecipe, "alwaysinfernal"),
-                        (Boolean) field(mobRecipe, "infernalityAllowed"))));
         }
 
         JsonObject result = new JsonObject();

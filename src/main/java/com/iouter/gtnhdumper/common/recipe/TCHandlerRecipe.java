@@ -16,6 +16,8 @@ import com.gtnewhorizons.aspectrecipeindex.nei.arcaneworkbench.ShapedArcaneRecip
 import com.gtnewhorizons.aspectrecipeindex.nei.arcaneworkbench.ShapelessArcaneRecipeHandler;
 import com.iouter.gtnhdumper.common.recipe.base.BaseHandlerRecipe;
 import com.iouter.gtnhdumper.common.recipe.base.RecipeItem;
+import com.iouter.gtnhdumper.common.utils.RecipeCoverage;
+import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 import com.iouter.gtnhdumper.common.utils.RecipeUtil;
 
 import codechicken.nei.NEIServerUtils;
@@ -50,85 +52,152 @@ public class TCHandlerRecipe extends BaseHandlerRecipe {
                     new TCRecipe().withInputAspects(inputAspects)
                         .withOutputAspects(outputAspects));
             }
-        } else if (handler instanceof ShapedArcaneRecipeHandler) {
+        } else if (handler.getClass() == ShapedArcaneRecipeHandler.class) {
             for (Object o : ThaumcraftApi.getCraftingRecipes()) {
-                if (!(o instanceof ShapedArcaneRecipe tcRecipe)) {
-                    continue;
-                }
-                Object[] inputItems = new Object[9];
-                for (int i = 0; i < tcRecipe.getInput().length; i++) {
-                    Object oInput = tcRecipe.getInput()[i];
-                    if (isItem(oInput)) {
-                        inputItems[i] = getItemFromObject(oInput);
+                try {
+                    if (!(o instanceof ShapedArcaneRecipe tcRecipe)) {
+                        continue;
                     }
-                }
-                recipes.add(
-                    new TCRecipe().withInputItems(inputItems)
-                        .withInputAspects(tcRecipe.aspects)
-                        .withOutputItems(new RecipeItem(tcRecipe.getRecipeOutput()))
-                        .withResearch(tcRecipe.getResearch()));
-            }
-        } else if (handler instanceof ShapelessArcaneRecipeHandler) {
-            for (Object o : ThaumcraftApi.getCraftingRecipes()) {
-                if (o instanceof ShapelessArcaneRecipe tcRecipe) {
+                    Object[] inputItems = new Object[9];
+                    for (int i = 0; i < tcRecipe.getInput().length; i++) {
+                        Object oInput = tcRecipe.getInput()[i];
+                        if (isItem(oInput)) {
+                            inputItems[(i / tcRecipe.width) * 3 + i % tcRecipe.width] = getItemFromObject(oInput);
+                        }
+                    }
                     recipes.add(
-                        new TCRecipe().withInputItems(
-                            Arrays.stream(
-                                tcRecipe.getInput()
-                                    .toArray())
-                                .filter(TCHandlerRecipe::isItem)
-                                .map(TCHandlerRecipe::getItemFromObject)
-                                .toArray(Object[]::new))
-                            .withInputAspects(tcRecipe.getAspects())
+                        new TCRecipe().withInputItems(inputItems)
+                            .withInputAspects(tcRecipe.aspects)
                             .withOutputItems(new RecipeItem(tcRecipe.getRecipeOutput()))
                             .withResearch(tcRecipe.getResearch()));
+
+                } catch (RuntimeException | LinkageError e) {
+                    if (!RecipeItemVariants.isCollecting()) throw e;
+                    RecipeItemVariants.reportFailure("TCHandlerRecipe.java entry", e);
+                }
+            }
+        } else if (handler.getClass() == ShapelessArcaneRecipeHandler.class) {
+            for (Object o : ThaumcraftApi.getCraftingRecipes()) {
+                try {
+                    if (o instanceof ShapelessArcaneRecipe tcRecipe) {
+                        recipes.add(
+                            new TCRecipe().withInputItems(
+                                Arrays.stream(
+                                    tcRecipe.getInput()
+                                        .toArray())
+                                    .filter(TCHandlerRecipe::isItem)
+                                    .map(TCHandlerRecipe::getItemFromObject)
+                                    .toArray(Object[]::new))
+                                .withInputAspects(tcRecipe.getAspects())
+                                .withOutputItems(new RecipeItem(tcRecipe.getRecipeOutput()))
+                                .withResearch(tcRecipe.getResearch()));
+                    }
+
+                } catch (RuntimeException | LinkageError e) {
+                    if (!RecipeItemVariants.isCollecting()) throw e;
+                    RecipeItemVariants.reportFailure("TCHandlerRecipe.java entry", e);
                 }
             }
         } else if (handler instanceof AlchemyRecipeHandler) {
             for (Object o : ThaumcraftApi.getCraftingRecipes()) {
-                if (!(o instanceof CrucibleRecipe tcRecipe)) {
-                    continue;
-                }
-                recipes.add(
-                    new TCRecipe().withInputItems(getItemFromObject(tcRecipe.catalyst))
-                        .withInputAspects(tcRecipe.aspects)
-                        .withOutputItems(new RecipeItem(tcRecipe.getRecipeOutput()))
-                        .withResearch(tcRecipe.key));
-            }
-        } else if (handler instanceof InfusionRecipeHandler) {
-            for (Object o : ThaumcraftApi.getCraftingRecipes()) {
-                if (!(o instanceof InfusionRecipe tcRecipe)) {
-                    continue;
-                }
                 try {
-                    EnhancedInfusionRecipe r = InfusionRecipeExt.get()
-                        .convert(tcRecipe);
-                    ItemStack outputStack;
-                    if (tcRecipe.getRecipeOutput() instanceof ItemStack) {
-                        outputStack = (ItemStack) tcRecipe.getRecipeOutput();
-                    } else {
-                        outputStack = tcRecipe.getRecipeInput()
-                            .copy();
-                        Object[] obj = (Object[]) tcRecipe.getRecipeOutput();
-                        NBTBase tag = (NBTBase) obj[1];
-                        outputStack.setTagInfo((String) obj[0], tag);
+                    if (!(o instanceof CrucibleRecipe tcRecipe)) {
+                        continue;
                     }
                     recipes.add(
-                        new TCRecipe().withKeyItem(
-                            getItemFromObject(
+                        new TCRecipe().withInputItems(getItemFromObject(tcRecipe.catalyst))
+                            .withInputAspects(tcRecipe.aspects)
+                            .withOutputItems(new RecipeItem(tcRecipe.getRecipeOutput()))
+                            .withResearch(tcRecipe.key));
+
+                } catch (RuntimeException | LinkageError e) {
+                    if (!RecipeItemVariants.isCollecting()) throw e;
+                    RecipeItemVariants.reportFailure("TCHandlerRecipe.java entry", e);
+                }
+            }
+        } else if (handler.getClass() == InfusionRecipeHandler.class) {
+            for (Object o : ThaumcraftApi.getCraftingRecipes()) {
+                try {
+                    if (!(o instanceof InfusionRecipe tcRecipe)) {
+                        continue;
+                    }
+                    if (tcRecipe.getRecipeInput() == null) {
+                        RecipeCoverage.unsupported(
+                            tcRecipe.getClass()
+                                .getName() + ":"
+                                + tcRecipe.getResearch(),
+                            "Infusion recipe has no static central item; dynamic inputs/outputs require a dedicated adapter");
+                        continue;
+                    }
+                    try {
+                        EnhancedInfusionRecipe r = InfusionRecipeExt.get()
+                            .convert(tcRecipe);
+                        ItemStack outputStack;
+                        RecipeItem exampleInput = null;
+                        String outputNbtPatch = null;
+                        java.util.Map<String, Object> outputTransform = null;
+                        ItemStack exampleStack = null;
+                        if (com.iouter.gtnhdumper.common.utils.InfusionExamples.hasCustomOutput(tcRecipe)) {
+                            exampleStack = com.iouter.gtnhdumper.common.utils.InfusionExamples.choose(
                                 r.getCentral()
-                                    .getRepresentativeStacks()))
-                            .withInputItems(
-                                r.getComponentsExt()
-                                    .stream()
-                                    .map(rI -> getItemFromObject(rI.getRepresentativeStacks()))
-                                    .filter(java.util.Objects::nonNull)
-                                    .toArray(Object[]::new))
-                            .withInputAspects(tcRecipe.getAspects())
-                            .withOutputItems(getItemFromObject(outputStack))
-                            .withInstability(tcRecipe.getInstability())
-                            .withResearch(tcRecipe.getResearch()));
-                } catch (Exception ignored) {}
+                                    .getRepresentativeStacks(),
+                                codechicken.nei.ItemList.items,
+                                candidate -> candidate.getItem() == tcRecipe.getRecipeInput()
+                                    .getItem());
+                            exampleStack = com.iouter.gtnhdumper.common.utils.InfusionExamples
+                                .prepareCustomInput(tcRecipe, exampleStack);
+                            exampleInput = new RecipeItem(exampleStack);
+                            outputStack = (ItemStack) tcRecipe.getRecipeOutput(exampleStack);
+                            outputTransform = com.iouter.gtnhdumper.common.utils.InfusionExamples.customRule(tcRecipe);
+                        } else if (tcRecipe.getRecipeOutput() instanceof ItemStack) {
+                            outputStack = (ItemStack) tcRecipe.getRecipeOutput();
+                        } else {
+                            Object[] obj = (Object[]) tcRecipe.getRecipeOutput();
+                            NBTBase tag = (NBTBase) obj[1];
+                            ItemStack example = com.iouter.gtnhdumper.common.utils.InfusionExamples.choose(
+                                r.getCentral()
+                                    .getRepresentativeStacks(),
+                                codechicken.nei.ItemList.items,
+                                candidate -> r.getCentral()
+                                    .matches(candidate));
+                            exampleInput = new RecipeItem(example);
+                            outputStack = com.iouter.gtnhdumper.common.utils.InfusionExamples
+                                .apply(example, (String) obj[0], tag);
+                            net.minecraft.nbt.NBTTagCompound patch = new net.minecraft.nbt.NBTTagCompound();
+                            patch.setTag((String) obj[0], tag.copy());
+                            outputNbtPatch = patch.toString();
+                        }
+                        recipes.add(
+                            new TCRecipe().withKeyItem(
+                                getItemFromObject(
+                                    r.getCentral()
+                                        .getRepresentativeStacks()))
+                                .withInputItems(
+                                    r.getComponentsExt()
+                                        .stream()
+                                        .map(rI -> getItemFromObject(rI.getRepresentativeStacks()))
+                                        .filter(java.util.Objects::nonNull)
+                                        .toArray(Object[]::new))
+                                .withInputAspects(
+                                    exampleStack == null ? tcRecipe.getAspects() : tcRecipe.getAspects(exampleStack))
+                                .withOutputItems(getItemFromObject(outputStack))
+                                .withExample(exampleInput, outputNbtPatch)
+                                .withOutputTransform(outputTransform)
+                                .withInstability(
+                                    exampleStack == null ? tcRecipe.getInstability()
+                                        : tcRecipe.getInstability(exampleStack))
+                                .withResearch(tcRecipe.getResearch()));
+                    } catch (Exception e) {
+                        RecipeItemVariants.reportFailure(
+                            "Infusion " + tcRecipe.getClass()
+                                .getName() + " research=" + tcRecipe.getResearch(),
+                            e);
+                    }
+
+                } catch (RuntimeException | LinkageError e) {
+                    if (!RecipeItemVariants.isCollecting()) throw e;
+                    RecipeItemVariants.reportFailure("TCHandlerRecipe.java entry", e);
+                }
             }
         }
         if (recipes.isEmpty()) {
@@ -151,6 +220,21 @@ public class TCHandlerRecipe extends BaseHandlerRecipe {
     public static class TCRecipe {
 
         private Object keyItem;
+        private RecipeItem exampleInput;
+        private String outputNbtPatch;
+        private java.util.Map<String, Object> outputTransform;
+
+        public TCRecipe withOutputTransform(java.util.Map<String, Object> rule) {
+            this.outputTransform = rule;
+            return this;
+        }
+
+        /** outputItems为该输入的展示产物；keyItem仍保存完整中央输入条件。 */
+        public TCRecipe withExample(RecipeItem input, String patch) {
+            this.exampleInput = input;
+            this.outputNbtPatch = patch;
+            return this;
+        }
 
         private Object[] inputItems;
         private AspectList inputAspects;
@@ -158,7 +242,7 @@ public class TCHandlerRecipe extends BaseHandlerRecipe {
         private Object[] outputItems;
         private AspectList outputAspects;
 
-        private String research;
+        private java.util.List<String> research;
 
         private Integer instability;
 
@@ -190,7 +274,8 @@ public class TCHandlerRecipe extends BaseHandlerRecipe {
         }
 
         public TCRecipe withResearch(String research) {
-            this.research = research;
+            this.research = research == null || research.isEmpty() ? java.util.Collections.emptyList()
+                : java.util.Collections.singletonList(research);
             return this;
         }
 
