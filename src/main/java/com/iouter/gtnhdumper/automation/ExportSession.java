@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiMainMenu;
+import net.minecraft.client.settings.GameSettings;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -112,6 +113,7 @@ public final class ExportSession {
     private long nextHeartbeat;
     private volatile boolean finished;
     private final AtomicBoolean exitScheduled = new AtomicBoolean();
+    private ClientSettings originalSettings;
 
     private ExportSession(JsonObject request, File gameDirectory) throws IOException {
         runId = request.get("runId")
@@ -175,11 +177,8 @@ public final class ExportSession {
     public static void register() {
         File game = Minecraft.getMinecraft().mcDataDir;
         File requestFile = new File(game, "config/gtnhdumper-autorun.json");
-        if (!requestFile.isFile()) return;
         try {
-            JsonObject request = GTNHDumper.GSON.fromJson(
-                new String(Files.readAllBytes(requestFile.toPath()), StandardCharsets.UTF_8),
-                JsonObject.class);
+            JsonObject request = readRequest(requestFile.toPath(), GTNHDumper.GSON);
             if (request == null || !request.has("enabled")
                 || !request.get("enabled")
                     .getAsBoolean())
@@ -227,6 +226,30 @@ public final class ExportSession {
             active = null;
             GTNHDumper.LOG.error("Cannot initialize automated export", error);
         }
+    }
+
+    /** Create an editable, disabled request on first launch; preserve an existing request verbatim. */
+    static JsonObject readRequest(Path path, com.google.gson.Gson gson) throws IOException {
+        if (!Files.exists(path)) {
+            JsonObject defaults = new JsonObject();
+            defaults.addProperty("enabled", false);
+            defaults.addProperty("keepWorld", false);
+            defaults.addProperty("exitGame", true);
+            defaults.addProperty("seed", 290002L);
+            defaults.addProperty("smoke", false);
+            defaults.addProperty("layoutsOnly", false);
+            defaults.addProperty("imagesOnly", false);
+            defaults.addProperty("imageDiagnostics", false);
+            // Omitted image paths/keys select a full export; runId is generated for each armed launch.
+            Files.createDirectories(path.getParent());
+            Files.write(
+                path,
+                gson.toJson(defaults)
+                    .getBytes(StandardCharsets.UTF_8),
+                java.nio.file.StandardOpenOption.CREATE_NEW);
+            return defaults;
+        }
+        return gson.fromJson(new String(Files.readAllBytes(path), StandardCharsets.UTF_8), JsonObject.class);
     }
 
     public static boolean isExporting() {
@@ -340,13 +363,14 @@ public final class ExportSession {
             if (preparationError != null) throw new IllegalStateException(
                 prepared ? "Export world became unavailable" : "World preparation failed",
                 preparationError);
-            mc.gameSettings.pauseOnLostFocus = false;
             if (stage.equals("WAIT_MENU")) {
                 if (!(mc.currentScreen instanceof GuiMainMenu)
                     && (mc.currentScreen == null || !mc.currentScreen.getClass()
                         .getName()
                         .equals("lumien.custommainmenu.gui.GuiCustom")))
                     return;
+                originalSettings = new ClientSettings(mc.gameSettings);
+                mc.gameSettings.pauseOnLostFocus = false;
                 String world = "Dumper-" + runId;
                 Files.createDirectories(worldDirectory.getParent());
                 if (!worldDirectory.getParent()
@@ -448,9 +472,9 @@ public final class ExportSession {
     private void finish(Minecraft mc) {
         if (finished) return;
         finished = true;
-        if (pendingIcons != null) pendingIcons.cancelCapture();
         exporting = false;
         try {
+            if (pendingIcons != null) pendingIcons.cancelCapture();
             closingWorld = true;
             int before = loggedErrors.get();
             // loadWorld waits for the integrated server to save and stop, then flushes the save cache.
@@ -476,12 +500,32 @@ public final class ExportSession {
             }
         } finally {
             closingWorld = false;
+            if (originalSettings != null) originalSettings.restore(mc.gameSettings);
         }
         if (exitGame) {
             mc.shutdown();
             scheduleExit();
         } else if (lifecycleComplete) {
             mc.displayGuiScreen(new GuiMainMenu());
+        }
+    }
+
+    /** Export-only settings are restored after world shutdown, including failures during preparation or capture. */
+    static final class ClientSettings {
+
+        private final boolean pauseOnLostFocus;
+        private final EnumDifficulty difficulty;
+
+        ClientSettings(GameSettings settings) {
+            pauseOnLostFocus = settings.pauseOnLostFocus;
+            difficulty = settings.difficulty;
+        }
+
+        void restore(GameSettings settings) {
+            settings.pauseOnLostFocus = pauseOnLostFocus;
+            settings.difficulty = difficulty;
+            // World startup or other UI actions may have persisted the temporary values to options.txt.
+            settings.saveOptions();
         }
     }
 

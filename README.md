@@ -41,7 +41,8 @@ GT 配方需要在加载配方前开启 `config/GregTech/Client.cfg` 的 `NEIRec
 
 ## 一次性自动进档导出
 
-在游戏目录创建 `config/gtnhdumper-autorun.json`，然后正常启动客户端：
+首次启动会在游戏目录生成 `config/gtnhdumper-autorun.json`，默认 `enabled: false`。
+需要导出时将 `enabled` 改为 `true`，然后正常启动客户端。也可以提前创建该文件：
 
 ```json
 {
@@ -59,6 +60,7 @@ GT 配方需要在加载配方前开启 `config/GregTech/Client.cfg` 的 `NEIRec
 
 导出后等待集成服务器保存、停止并刷新存档缓存。成功时按 `keepWorld` 保留或删除本次创建的存档；
 导出或停止阶段报错时保留存档。`exitGame: true` 随后退出客户端，`false` 返回主菜单。
+结束时恢复并保存运行前的难度和失焦暂停设置，准备或导出失败时也执行恢复。
 清理失败会报告 `FAILED`，保留剩余内容。`EXPORTED` 表示导出任务及存档退出流程完成；随后可用数据处理工具检查物品关联和图片完整性。
 
 可选参数：`runId`（1–101 位字母、数字、下划线或连字符，首字符必须是字母或数字，默认自动生成）、

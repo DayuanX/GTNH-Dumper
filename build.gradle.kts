@@ -138,3 +138,12 @@ val checkTimedIconFrames by tasks.registering(JavaExec::class) {
 }
 
 tasks.check.configure { dependsOn(checkTimedIconFrames) }
+
+val checkExportSettings by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Checks first-launch export configuration and restoration of temporary client settings."
+    classpath(configurations.compileClasspath, functionalTest.runtimeClasspath, sourceSets.main.get().output, sourceSets.patchedMc.get().output)
+    mainClass.set("com.iouter.gtnhdumper.automation.ExportSettingsRegression")
+}
+
+tasks.check.configure { dependsOn(checkExportSettings) }
