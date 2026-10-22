@@ -5,6 +5,21 @@ plugins {
     id("com.gtnewhorizons.gtnhconvention")
 }
 
+// Keep the convention's formatter and rules; Eclipse's old P2 endpoint serves HTML.
+spotless {
+    java {
+        clearSteps()
+        importOrderFile(com.diffplug.blowdryer.Blowdryer.file("spotless.importorder"))
+        removeUnusedImports()
+        eclipse("4.19.0")
+            .configFile(com.diffplug.blowdryer.Blowdryer.file("spotless.eclipseformat.xml"))
+            .withP2Mirrors(mapOf(
+                "https://download.eclipse.org/eclipse/updates/4.19/" to
+                    "https://mirrors.huaweicloud.com/eclipse/eclipse/updates/4.19/"
+            ))
+    }
+}
+
 // workaround an OOM on GH actions during the checkStyleMain task
 tasks.withType<Checkstyle>().configureEach {
     maxHeapSize = "1g"
