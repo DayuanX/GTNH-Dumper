@@ -12,3 +12,4 @@ jobs:
     secrets: inherit
     with:
       client-only: true
+      workspace: setupCIWorkspace spotlessDiagnose
