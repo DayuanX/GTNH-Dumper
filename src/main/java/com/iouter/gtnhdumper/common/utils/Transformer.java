@@ -101,6 +101,9 @@ public class Transformer {
             metadata.put("fuelEnergyEU", (long) src.mSpecialValue * amount);
         }
         if (metadata != null && metadata.isEmpty()) metadata = null;
+        thaumcraft.api.aspects.AspectList inputAspects = addonInputAspects(src, metadata);
+        // These named pools use the special slot only as an essentia display, not a selectable item input.
+        if (inputAspects != null) otherItems = null;
         return new GTDefaultHandlerRecipe.GTDumpedRecipe(
             inputItems,
             inputFluids,
@@ -111,7 +114,32 @@ public class Transformer {
             src.mDuration,
             src.mSpecialValue,
             metadata).withSourceMod(GTDefaultHandlerRecipe.originalOwner(src))
+                .withInputAspects(inputAspects)
                 .withDisplayData(src);
+    }
+
+    /** 工业注魔与炼金的源质需求沿用神秘时代的 inputAspects 结构；其他特殊槽保持原有语义。 */
+    private static thaumcraft.api.aspects.AspectList addonInputAspects(GTRecipe recipe, Map<String, Object> metadata) {
+        String pool = recipe.getRecipeCategory().recipeMap.unlocalizedName;
+        String key = switch (pool) {
+            case "gtnl.recipe.industrial_infusion_crafting" -> "gtnl_infusion_aspects";
+            case "gtnl.recipe.industrial_shaped_arcane_crafting" -> "gtnl_arcane_vis";
+            default -> null;
+        };
+        if (key != null) {
+            if (metadata == null || !(metadata.get(key) instanceof thaumcraft.api.aspects.AspectList aspects))
+                throw new IllegalStateException("Missing essentia metadata for " + pool);
+            return aspects;
+        }
+        if (pool.equals("tst.common.recipe.IndustrialMagicMatrixRecipeMap.name")
+            || pool.equals("tst.common.recipe.IndustrialAlchemyTowerRecipeMap.name")) {
+            if (!(recipe.mSpecialItems instanceof ItemStack stack) || !stack.hasTagCompound())
+                throw new IllegalStateException("Missing essentia display stack for " + pool);
+            thaumcraft.api.aspects.AspectList aspects = new thaumcraft.api.aspects.AspectList();
+            aspects.readFromNBT(stack.getTagCompound());
+            return aspects;
+        }
+        return null;
     }
 
     /** CropsNH metadata stores live registry objects; export identities and breeding rules, not runtime state. */

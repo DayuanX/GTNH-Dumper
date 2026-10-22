@@ -4,7 +4,6 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -94,45 +93,8 @@ public class StructureDumpHelper {
                 throw new IllegalStateException("结构名称 '" + name + "' 的 shape 字符串与 elements 数组长度不匹配！");
             }
 
-            // 记录实际放置的方块字符
-            Map<String, Character> grid = getStringCharacterMap(shapeStr, elements);
-
-            // 2. 确定最终网格的最大维度
-            // (必须结合 occupiedSpace，以防结构只有 '~' 而没有其他方块，导致 grid 为空)
-            int maxA = 0, maxB = 0, maxC = 0;
-            for (String key : grid.keySet()) {
-                String[] parts = key.split(",");
-                maxC = Math.max(maxC, Integer.parseInt(parts[0]));
-                maxB = Math.max(maxB, Integer.parseInt(parts[1]));
-                maxA = Math.max(maxA, Integer.parseInt(parts[2]));
-            }
-            for (Vec3Impl vec : occupiedSpace) {
-                maxA = Math.max(maxA, vec.get0()); // get0() 对应 a 轴 (aa)
-                maxB = Math.max(maxB, vec.get1()); // get1() 对应 b 轴 (bb)
-                maxC = Math.max(maxC, vec.get2()); // get2() 对应 c 轴 (cc)
-            }
-
-            // 3. 构建解码后的 String[][] (维度为 [slice=c][row=b])
-            String[][] decoded = new String[maxC + 1][maxB + 1];
-            for (int i = 0; i <= maxC; i++) {
-                for (int j = 0; j <= maxB; j++) {
-                    char[] row = new char[maxA + 1];
-                    Arrays.fill(row, ' '); // 默认未占用的空间填充为空格
-
-                    for (int k = 0; k <= maxA; k++) {
-                        String key = i + "," + j + "," + k;
-                        Character placed = grid.get(key);
-                        if (placed != null) {
-                            row[k] = placed;
-                        } else if (occupiedSpace.contains(Vec3Impl.getFromPool(k, j, i))) {
-                            // 核心逻辑：如果该位置没有实际方块字符，但却在 occupiedSpaces 中，
-                            // 那么根据 addShape 的源码逻辑，它 100% 是原始的 '~' (Controller 标记)！
-                            row[k] = '~';
-                        }
-                    }
-                    decoded[i][j] = new String(row);
-                }
-            }
+            Map<Vec3Impl, Character> blocks = getPlacedBlocks(shapeStr, elements);
+            String[][] decoded = StructureShapeGrid.decode(blocks, occupiedSpace);
 
             result.put(name, decoded);
         }
@@ -140,9 +102,8 @@ public class StructureDumpHelper {
         return result;
     }
 
-    private static @NotNull Map<String, Character> getStringCharacterMap(String shapeStr,
-        IStructureElement<?>[] elements) {
-        Map<String, Character> grid = new HashMap<>();
+    private static @NotNull Map<Vec3Impl, Character> getPlacedBlocks(String shapeStr, IStructureElement<?>[] elements) {
+        Map<Vec3Impl, Character> grid = new HashMap<>();
 
         // 模拟 StructureUtility.iterateV2 的坐标追踪
         int a = 0, b = 0, c = 0;
@@ -155,7 +116,7 @@ public class StructureDumpHelper {
                 b = (elem.resetB() ? 0 : b) + elem.getStepB();
                 c = (elem.resetC() ? 0 : c) + elem.getStepC();
             } else {
-                grid.put(c + "," + b + "," + a, ch);
+                grid.put(new Vec3Impl(a, b, c), ch);
                 a++;
             }
         }

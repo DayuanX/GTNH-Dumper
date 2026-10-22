@@ -105,12 +105,34 @@ public final class NEILayoutDumper {
                     int height = info == null ? 65 : info.getHeight();
                     entry.put("modId", info == null ? "Unknown" : info.getModId());
                     Set<String> signatures = new LinkedHashSet<>();
+                    List<Map<String, Object>> variants = new ArrayList<>();
+                    boolean dynamic = handler instanceof GTNEIDefaultHandler gt
+                        && com.iouter.gtnhdumper.common.utils.NEIDynamicSlots.supports(gt);
+                    Map<String, List<Map<String, Object>>> widgetSlots = handler instanceof GTNEIDefaultHandler gt
+                        ? gtSlots(gt)
+                        : null;
                     Map<String, List<Map<String, Object>>> best = null;
                     int bestIndex = 0;
                     int bestCount = -1;
                     for (int i = 0; i < count; i++) {
                         Map<String, List<Map<String, Object>>> slots = slots(handler, i);
-                        signatures.add(GTNHDumper.GSON.toJson(slots));
+                        if (dynamic) {
+                            slots = new LinkedHashMap<>(widgetSlots);
+                            slots.putAll(
+                                com.iouter.gtnhdumper.common.utils.NEIDynamicSlots
+                                    .read((GTNEIDefaultHandler) handler, i));
+                        }
+                        boolean newGeometry = signatures.add(GTNHDumper.GSON.toJson(slots));
+                        if (dynamic && newGeometry) {
+                            Map<String, Object> variant = new LinkedHashMap<>();
+                            variant.put("sampleRecipe", i);
+                            variant.put(
+                                "specialValue",
+                                ((GTNEIDefaultHandler.CachedDefaultRecipe) ((GTNEIDefaultHandler) handler).arecipes
+                                    .get(i)).mRecipe.mSpecialValue);
+                            variant.put("slots", slots);
+                            variants.add(variant);
+                        }
                         int size = slots.values()
                             .stream()
                             .mapToInt(List::size)
@@ -122,8 +144,12 @@ public final class NEILayoutDumper {
                         }
                     }
                     if (handler instanceof GTNEIDefaultHandler gt) {
-                        best = gtSlots(gt);
-                        entry.put("slotSource", "ModularUI widget inventory and slot index; includes empty slots");
+                        if (!dynamic || best == null) best = widgetSlots;
+                        entry.put(
+                            "slotSource",
+                            dynamic ? "ModularUI widgets plus recipe-dependent overlay positions"
+                                : "ModularUI widget inventory and slot index; includes empty slots");
+                        if (dynamic) entry.put("layoutVariants", variants);
                     } else {
                         entry.put("slotSource", "largest occupied-slot recipe sample");
                     }
@@ -231,7 +257,6 @@ public final class NEILayoutDumper {
         }
     }
 
-    /** 部分处理器没有 transfer rect，按其自身提供的配方标识加载，例如 GalaxySpace 火箭。 */
     /** 按处理器的实际查询标识加载；配方与布局导出共用，避免工作台仅导出空列表。 */
     public static IRecipeHandler loadHandler(IRecipeHandler registered) throws Exception {
         if (!(registered instanceof TemplateRecipeHandler template)) {
@@ -264,6 +289,27 @@ public final class NEILayoutDumper {
             }
             throw new IllegalArgumentException(
                 "Identifier/all loaders returned no views; this handler needs an item query or interactive state");
+        }
+        if (template.getClass()
+            .getName()
+            .equals("galaxyspace.core.nei.CustomRockRecipeHandler")) {
+            TemplateRecipeHandler candidate = com.iouter.gtnhdumper.common.utils.NEIHandlerInstances.create(template);
+            candidate.loadCraftingRecipes(
+                (String) template.getClass()
+                    .getField("recipeId")
+                    .get(template));
+            return candidate;
+        }
+        if (template.getClass()
+            .getName()
+            .equals("com.science.gtnl.client.nei.NuclearReactorGuideHandler")) {
+            // This guide has no crafting/all query; its usage query is keyed by the reactor controller.
+            Object controller = Class.forName("com.science.gtnl.utils.enums.GTNLItemList")
+                .getField("NuclearReactor")
+                .get(null);
+            TemplateRecipeHandler candidate = template.newInstance();
+            candidate.loadUsageRecipes(((gregtech.api.interfaces.IItemContainer) controller).get(1));
+            return candidate;
         }
         IRecipeHandler loaded = template.getAllRecipeHandler();
         if (loaded.numRecipes() > 0) return loaded;

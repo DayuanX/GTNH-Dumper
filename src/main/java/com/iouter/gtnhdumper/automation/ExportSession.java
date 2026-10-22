@@ -304,7 +304,9 @@ public final class ExportSession {
         Minecraft mc = Minecraft.getMinecraft();
         try {
             if (System.currentTimeMillis() > deadline) throw new IllegalStateException("Export timed out");
-            if (preparationError != null) throw new IllegalStateException("World preparation failed", preparationError);
+            if (preparationError != null) throw new IllegalStateException(
+                prepared ? "Export world became unavailable" : "World preparation failed",
+                preparationError);
             mc.gameSettings.pauseOnLostFocus = false;
             if (stage.equals("WAIT_MENU")) {
                 if (!(mc.currentScreen instanceof GuiMainMenu)
@@ -367,12 +369,14 @@ public final class ExportSession {
                         throw new IllegalStateException("Dumper logged errors in " + task.name);
                     completed.add(task.name);
                 } catch (Exception | LinkageError error) {
-                    throw new IllegalStateException("Automated export task failed: " + task.name, error);
+                    // Tasks write separate outputs. Keep later diagnostics/material dumps, but fail the run overall.
+                    failed.add("Automated export task failed: " + task.name + ": " + error);
+                    GTNHDumper.LOG.error("Automated export task failed: " + task.name, error);
                 } finally {
                     exporting = false;
                     taskMillis.put(task.name, (System.nanoTime() - started) / 1000000L);
                 }
-                status("EXPORTING", "Finished " + task.name);
+                status("EXPORTING", (completed.contains(task.name) ? "Finished " : "Failed ") + task.name);
                 return;
             }
             finish(mc);

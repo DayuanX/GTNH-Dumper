@@ -41,6 +41,9 @@ public final class NEIRecipeText {
             .getName();
         try {
             switch (source) {
+                case "com.science.gtnl.client.nei.NuclearReactorGuideHandler" -> {
+                    for (Object line : (List<?>) call(recipe, "getLines")) lines.add((String) line);
+                }
                 case "alkalus.main.nei.NEI_Handler_Distillery" -> {
                     List<Object> inputs = new ArrayList<>(), outputs = new ArrayList<>();
                     for (String name : new String[] { "ingred1", "ingred2", "jars" }) {

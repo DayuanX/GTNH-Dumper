@@ -8,6 +8,8 @@ import net.minecraft.item.ItemStack;
 
 import com.google.common.base.Objects;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 import com.iouter.gtnhdumper.common.utils.RecipeUtil;
@@ -46,7 +48,7 @@ public abstract class BaseHandlerRecipe {
                     e);
             }
             // Some adapters return raw ItemStacks; retain their normal serializer capture path.
-            GSON.toJsonTree(getRecipes(handler));
+            serializeRecipes(handler);
             return;
         }
         json.addProperty("name", handler.getRecipeName());
@@ -69,7 +71,36 @@ public abstract class BaseHandlerRecipe {
 
         addJsonObject(json, handler);
 
-        json.add("recipes", GSON.toJsonTree(getRecipes(handler)));
+        json.add("recipes", serializeRecipes(handler));
+    }
+
+    private JsonElement serializeRecipes(IRecipeHandler handler) {
+        List<?> recipes = getRecipes(handler);
+        if (recipes == null) return JsonNull.INSTANCE;
+        JsonArray result = new JsonArray();
+        for (int index = 0; index < recipes.size(); index++) {
+            Object recipe = recipes.get(index);
+            try {
+                result.add(GSON.toJsonTree(recipe));
+            } catch (StackOverflowError error) {
+                // Gson's recursive frames erase the caller from the crash stack; retain the exact source record.
+                throw new IllegalStateException(
+                    "Recursive recipe serialization: handler=" + handler.getHandlerId()
+                        + "; overlay="
+                        + (handler instanceof TemplateRecipeHandler ? handler.getOverlayIdentifier() : null)
+                        + "; source="
+                        + handler.getClass()
+                            .getName()
+                        + "; recipeIndex="
+                        + index
+                        + "; recordType="
+                        + (recipe == null ? "null"
+                            : recipe.getClass()
+                                .getName()),
+                    error);
+            }
+        }
+        return result;
     }
 
     public void addJsonObject(JsonObject json, IRecipeHandler handler) {

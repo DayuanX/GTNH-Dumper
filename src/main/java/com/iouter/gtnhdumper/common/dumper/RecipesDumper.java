@@ -201,7 +201,8 @@ public class RecipesDumper extends FilteredDataDumper {
         }
         for (IRecipeHandler handler : GuiUsageRecipe.usagehandlers) {
             // NEI initializes lazy caches (including furnace fuels) when creating a query instance.
-            if (handler instanceof TemplateRecipeHandler prototype) handler = prototype.newInstance();
+            if (handler instanceof TemplateRecipeHandler prototype)
+                handler = com.iouter.gtnhdumper.common.utils.NEIHandlerInstances.create(prototype);
             TemplateRecipeHandler template = handler instanceof TemplateRecipeHandler ? (TemplateRecipeHandler) handler
                 : null;
             List<TemplateRecipeHandler.CachedRecipe> previous = template == null ? null
@@ -248,7 +249,8 @@ public class RecipesDumper extends FilteredDataDumper {
         ModFilter filter = ModFilter.current();
         Map<String, String> skipped = new LinkedHashMap<>();
         for (IRecipeHandler handler : GuiUsageRecipe.usagehandlers) {
-            if (handler instanceof TemplateRecipeHandler prototype) handler = prototype.newInstance();
+            if (handler instanceof TemplateRecipeHandler prototype)
+                handler = com.iouter.gtnhdumper.common.utils.NEIHandlerInstances.create(prototype);
             final String name = handler.getRecipeName();
             if (filter.isActive() && !(CommonProxy.isGTLoaded && handler instanceof GTNEIDefaultHandler)) {
                 skipped.put(handler.getHandlerId(), "Original registering mod is not recorded by this handler");

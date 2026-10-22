@@ -251,6 +251,12 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
         private Integer burnTime;
         private List<String> allowedBoilerTypes;
         private Map<String, Integer> fluidDurations;
+        private thaumcraft.api.aspects.AspectList inputAspects;
+
+        public GTDumpedRecipe withInputAspects(thaumcraft.api.aspects.AspectList aspects) {
+            inputAspects = aspects;
+            return this;
+        }
 
         public GTDumpedRecipe withDisplayData(GTRecipe recipe) {
             if (RecipeItemVariants.isCollecting()) return this;

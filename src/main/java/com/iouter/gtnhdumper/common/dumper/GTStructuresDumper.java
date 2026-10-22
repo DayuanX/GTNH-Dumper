@@ -1,10 +1,13 @@
 package com.iouter.gtnhdumper.common.dumper;
 
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -57,33 +60,55 @@ public class GTStructuresDumper extends FilteredDataDumper {
 
     private void dumpStructures() {
         ModFilter filter = ModFilter.current();
-        Arrays.stream(GregTechAPI.METATILEENTITIES)
-            .filter(te -> te instanceof IConstructable)
-            .filter(te -> filter.matchesItem(te.getStackForm(1)))
-            .forEach(te -> {
-                IConstructable constructable = (IConstructable) te;
-                if (!(constructable.getStructureDefinition() instanceof StructureDefinition<?>structureDefinition)) {
-                    return;
+        Map<String, String> failures = new LinkedHashMap<>();
+        for (IMetaTileEntity te : GregTechAPI.METATILEENTITIES) {
+            if (!(te instanceof IConstructable constructable)) continue;
+            String name = te.getClass()
+                .getName();
+            Path temporary = null;
+            try {
+                if (!filter.matchesItem(te.getStackForm(1))) continue;
+                if (!(constructable.getStructureDefinition() instanceof StructureDefinition<?>definition)) continue;
+                // Decode before opening the destination, so a broken structure cannot leave an empty JSON file.
+                GTStructure structure = new GTStructure(te, definition, constructable);
+                Path output = filter.outputFile(
+                    "structures/" + te.getClass()
+                        .getSimpleName() + ".json")
+                    .toPath();
+                Files.createDirectories(output.getParent());
+                temporary = Files.createTempFile(output.getParent(), "structure-", ".tmp");
+                try (Writer writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8)) {
+                    GTNHDumper.GSON.toJson(structure, writer);
                 }
-                final String simpleName = te.getClass()
-                    .getSimpleName();
-                File file = filter.outputFile("structures/" + simpleName + ".json");
-                File parentDir = file.getParentFile();
-                if (parentDir != null && !parentDir.exists()) {
-                    parentDir.mkdirs();
+                Files.move(temporary, output, StandardCopyOption.REPLACE_EXISTING);
+                GTNHDumper.info("已写入：" + output.toAbsolutePath());
+            } catch (Exception | LinkageError error) {
+                failures.put(name, error.toString());
+                GTNHDumper.LOG.error("Could not export structure " + name, error);
+            } finally {
+                if (temporary != null) {
+                    try {
+                        Files.deleteIfExists(temporary);
+                    } catch (IOException error) {
+                        failures.put(name + " temporary file", error.toString());
+                        GTNHDumper.LOG.error("Could not remove incomplete structure file " + temporary, error);
+                    }
                 }
-                try (FileWriter writer = new FileWriter(file)) {
-                    GTNHDumper.GSON.toJson(new GTStructure(te, structureDefinition, constructable), writer);
-                    GTNHDumper.info("已写入：" + file.getAbsolutePath());
-                } catch (IOException e) {
-                    file.deleteOnExit();
-                    GTNHDumper.LOG.error(e);
-                } catch (Exception e) {
-                    GTNHDumper.info("导出" + simpleName + "时发生错误：" + e.getLocalizedMessage());
-                    file.deleteOnExit();
-                    GTNHDumper.LOG.error("Could not export structure " + simpleName, e);
-                }
-            });
+            }
+        }
+        // Keep failures outside structures/: consumers must not mistake diagnostics for a machine definition.
+        Path report = filter.outputFile("structure-failures.json")
+            .toPath();
+        try {
+            Files.createDirectories(report.getParent());
+            try (Writer writer = Files.newBufferedWriter(report, StandardCharsets.UTF_8)) {
+                GTNHDumper.GSON.toJson(failures, writer);
+            }
+        } catch (IOException error) {
+            throw new IllegalStateException("Could not write structure failure report", error);
+        }
+        if (!failures.isEmpty()) throw new IllegalStateException(
+            "Failed to export " + failures.size() + " structures; see structure-failures.json");
     }
 
     @Override
