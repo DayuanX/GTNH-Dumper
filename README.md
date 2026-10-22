@@ -19,23 +19,25 @@
   因此附属 Mod 共用 `gregtech:gt.blockmachines` 时，仍可归属到提供具体 MetaTileEntity
   实现类的 Mod；无法可靠解析实现类归属时回退到物品注册 Mod。
 - 配方：按 **原始配方来源** 筛选，目前使用 `GTRecipe.owners` 的第一条记录。
-  后续修改者、配方产物、机器和 NEI 分类的 Mod 都不作为原始来源。
+  来源表示最初注册该配方的 Mod。
   匹配后保留完整配方，包括其他 Mod 的原料和产物，并导出 `sourceMod` 便于核对。
 
 GT 配方需要在加载配方前开启 `config/GregTech/Client.cfg` 的 `NEIRecipeOwner=true`，修改后重启游戏。
 运行时打开该选项无法补回此前丢失的来源记录。缺少来源的 GT 配方、普通 NEI 配方以及 EOH/EEC
-等未保存来源的自定义配方不会被猜测归属；筛选时跳过并在 `recipes_filter_report.json` 中列出原因，
+等缺少来源记录的自定义配方，筛选时跳过并在 `recipes_filter_report.json` 中列出原因，
 游戏内也会显示提示。清空筛选仍可全量导出这些配方。
 
 研究、任务、任务线、TiC 材料、矿脉及维度等没有可靠逐项 Mod 归属的数据，在开启筛选时会提示并停止该项导出。
 
-### Recipe-only item variants
+## 配方专用物品变体
 
-The first item-information or item-icon export in a client session also visits the installed recipe dump adapters. Concrete inputs, outputs, alternatives (before ore-dictionary compression), catalysts, marked items and other exposed stacks supplement the creative-tab enumeration. Stacks are copied with their NBT and normalized to count 1; existing JSON keys, short keys and image filenames are unchanged. This does not deduplicate image pixels or invent dynamic NBT variants.
+客户端首次导出物品信息或图标时，会遍历已支持的配方处理器，收集输入、产物、矿辞压缩前的备选物品、催化物及其他展示物品，补充创造物品栏中的记录。每个物品保留 NBT，数量归一为 1，沿用现有 JSON key、short key 和图片命名规则。
 
-Successful snapshots are shared by subsequent item/icon exports until the client restarts. Incomplete scans are reported and retried on the next item/icon export; they are never retained as complete snapshots. Restart after changing recipes following a successful scan. All recipe handlers are visited because an item's owning mod can differ from a recipe's registering mod; the resulting items still use the existing item ownership filter, including GT machine ownership. A single-mod export therefore does not include every foreign dependency or require any wiki data. Recipe JSON source filtering is unchanged.
+完成的扫描结果供本次客户端会话后续导出复用。扫描失败会记入日志，并在下次物品或图标导出时重试；成功扫描后修改配方，需要重启客户端以更新结果。
 
-The log reports scan failures and a summary. A failing handler can leave that handler's coverage partial; cached NEI recipe slots and ordinary GT recipes are isolated so other readable entries can still be collected. Coverage is limited to the current adapters and their exposed stacks, not every dynamically generated NEI variant. Validate exports inside the intended GTNH client before relying on completeness.
+扫描会遍历全部配方处理器，再按物品所属 Mod 筛选结果，其中 GT 机器采用前述实现类归属规则。配方导出本身按原始配方来源筛选。
+
+日志包含扫描汇总和失败项，便于检查当前整合包中各处理器提供的物品记录。
 
 ## 一次性自动进档导出
 
@@ -49,31 +51,30 @@ The log reports scan failures and a summary. A failing handler can leave that ha
 }
 ```
 
-仅写 `{"enabled": true}` 也可使用上述默认值。无需外部脚本、Python 或特定启动器。
+仅写 `{"enabled": true}` 也可使用上述默认值。自动流程由模组在客户端内执行。
 启动时先将 `enabled` 改为 `false`，防止崩溃后重复运行；下次运行需手动重新开启。
-到主菜单后自动创建本次独占的 `Dumper-<runId>` 创造模式超平坦存档，等待 NEI 与神秘研究同步，
+到主菜单后自动创建本次专用的 `Dumper-<runId>` 创造模式超平坦存档，等待 NEI 与神秘研究同步，
 逐项导出到 `dumper-runs/<runId>/dumps/`。`request.json` 留存本次参数，`status.json` 记录进度、耗时和错误。
-已有同名存档或已使用的运行 ID 会被拒绝，不会进入或覆盖旧存档。
+运行 ID 和存档名称需要保持唯一；发生冲突时导出停止并报告错误。
 
 导出后等待集成服务器保存、停止并刷新存档缓存。成功时按 `keepWorld` 保留或删除本次创建的存档；
 导出或停止阶段报错时保留存档。`exitGame: true` 随后退出客户端，`false` 返回主菜单。
-清理失败会报告 `FAILED`，保留尚未删除的内容。`EXPORTED` 表示任务与生命周期完成，不代表外部数据完整性验证通过。
+清理失败会报告 `FAILED`，保留剩余内容。`EXPORTED` 表示导出任务及存档退出流程完成；随后可用数据处理工具检查物品关联和图片完整性。
 
 可选参数：`runId`（1–101 位字母、数字、下划线或连字符，首字符必须是字母或数字，默认自动生成）、
 `seed`（默认 `290002`）、`smoke: true`（仅导出 TiC 材料以检查生命周期）、
 `layoutsOnly: true`（仅导出 NEI 布局原始资料）。两种模式同时开启时优先使用 `layoutsOnly`。
 
-`imageMetadata` 接受先前图标 JSON 映射文件路径，只导入名称、帧数及尺寸等映射并跳过图标渲染，
-**不会拷贝 PNG**。使用者须自行配齐并核对图片。
+`imageMetadata` 接受先前图标 JSON 映射文件路径，导入名称、帧数及尺寸等映射并跳过图标渲染。
+使用此参数时，请将对应 PNG 配齐到输出目录并核对图片。
 `imageResume` 接受包含 `directory` 和 `images` 的 JSON 清单：`images` 将 PNG 文件名映射到 `[宽, 高]`，
 `directory` 指向图片目录。导出器按清单决定可复用项，将图片硬链接或拷贝到本次输出，缺失清单项继续渲染。
-这不是 PNG 内容验证接口；清单应由可信的外部验证流程生成。两者均需与当前整合包及导出设置匹配。
-状态中的 `imagesReused` 表示设置了上述任一复用参数，不表示实际复用数量或图片完整性。
+复用前应检查 PNG 内容，并确认映射或清单与当前整合包及导出设置匹配。
+状态中的 `imagesReused` 记录是否启用了上述任一复用参数。
 
 `managedByRunner: true` 是可选外部调度接口：模组仍负责创建世界、导出和安全退出存档，
-将世界保留给外部调度器验证、清理。外部调度器可通过该模式接入；
-启动器调用、PNG 验证及其他导出产物的交叉核验由外部工具负责，不属于模组运行依赖。
-外部调度器等待进程退出时须保持 `exitGame: true`。旧 `finalizer` 参数不再执行外部命令。
+将世界保留给外部调度器验证、清理。调度器负责启动客户端、验证 PNG 和核对导出数据。
+外部调度器等待进程退出时须保持 `exitGame: true`。
 
 配方物品的附加提示使用 `tooltip` 字段，通过 `RecipeItem.withTooltip(...)` 追加。
 普通配方物品序列化为以 `<br>` 连接的字符串；专用记录和流体槽也可保留提示列表。
