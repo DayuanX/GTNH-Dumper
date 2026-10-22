@@ -10,9 +10,12 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -82,6 +85,14 @@ public final class ExportSession {
     private volatile boolean closingWorld;
     private volatile boolean lifecycleComplete;
     private final boolean layoutsOnly;
+    private final boolean imagesOnly;
+    private final boolean imageDiagnostics;
+    private final Set<String> imageKeys = new LinkedHashSet<>();
+    private ItemIconDumper pendingIcons;
+    private boolean iconsReady;
+    private Throwable iconFailure;
+    private int iconErrors;
+    private long iconStarted;
     private final long seed;
     private final File imageMetadata;
     private final File imageResume;
@@ -122,6 +133,20 @@ public final class ExportSession {
             .getAsBoolean();
         layoutsOnly = request.has("layoutsOnly") && request.get("layoutsOnly")
             .getAsBoolean();
+        imageDiagnostics = request.has("imageDiagnostics") && request.get("imageDiagnostics")
+            .getAsBoolean();
+        imagesOnly = request.has("imagesOnly") && request.get("imagesOnly")
+            .getAsBoolean();
+        if (imagesOnly && (layoutsOnly || smoke))
+            throw new IllegalArgumentException("imagesOnly excludes layoutsOnly/smoke");
+        if (request.has("imageKeys")) {
+            for (com.google.gson.JsonElement key : request.getAsJsonArray("imageKeys")) {
+                String value = key.getAsString();
+                if (value.isEmpty()) throw new IllegalArgumentException("Empty image key");
+                imageKeys.add(value);
+            }
+            if (imageKeys.isEmpty()) throw new IllegalArgumentException("imageKeys must not be empty");
+        }
         seed = request.has("seed") ? request.get("seed")
             .getAsLong() : 290002L;
         imageMetadata = request.has("imageMetadata") ? new File(
@@ -210,6 +235,14 @@ public final class ExportSession {
 
     public static File outputDirectory() {
         return active.output;
+    }
+
+    public static boolean imageDiagnostics() {
+        return isExporting() && active.imageDiagnostics;
+    }
+
+    public static Set<String> imageKeys() {
+        return isExporting() ? Collections.unmodifiableSet(active.imageKeys) : Collections.emptySet();
     }
 
     public static File imageMetadata() {
@@ -358,12 +391,28 @@ public final class ExportSession {
                 status("EXPORTING", "World prepared; NEI and research are ready");
             }
             if (nextTask < tasks.size()) {
-                ExportTask task = tasks.get(nextTask++);
+                ExportTask task = tasks.get(nextTask);
+                if (task.icons != null && !iconsReady) {
+                    if (pendingIcons == null) {
+                        exporting = true;
+                        pendingIcons = task.icons;
+                        iconErrors = loggedErrors.get();
+                        iconStarted = System.nanoTime();
+                        status("EXPORTING", "Sampling timed item icons");
+                        pendingIcons.prepareTimedIconsAsync(() -> iconsReady = true, error -> {
+                            iconFailure = error;
+                            iconsReady = true;
+                        });
+                    }
+                    return;
+                }
+                nextTask++;
                 status("EXPORTING", task.name);
-                int before = loggedErrors.get();
-                long started = System.nanoTime();
+                int before = task.icons == null ? loggedErrors.get() : iconErrors;
+                long started = task.icons == null ? System.nanoTime() : iconStarted;
                 exporting = true;
                 try {
+                    if (iconFailure != null) throw new IllegalStateException("Icon sampling failed", iconFailure);
                     task.action.run();
                     if (loggedErrors.get() != before)
                         throw new IllegalStateException("Dumper logged errors in " + task.name);
@@ -373,6 +422,10 @@ public final class ExportSession {
                     failed.add("Automated export task failed: " + task.name + ": " + error);
                     GTNHDumper.LOG.error("Automated export task failed: " + task.name, error);
                 } finally {
+                    if (pendingIcons != null) pendingIcons.cancelCapture();
+                    pendingIcons = null;
+                    iconsReady = false;
+                    iconFailure = null;
                     exporting = false;
                     taskMillis.put(task.name, (System.nanoTime() - started) / 1000000L);
                 }
@@ -395,6 +448,8 @@ public final class ExportSession {
     private void finish(Minecraft mc) {
         if (finished) return;
         finished = true;
+        if (pendingIcons != null) pendingIcons.cancelCapture();
+        exporting = false;
         try {
             closingWorld = true;
             int before = loggedErrors.get();
@@ -477,7 +532,9 @@ public final class ExportSession {
     }
 
     private void add(String name, WikiDumper dumper, int mode) {
-        tasks.add(new ExportTask(name, () -> dumper.dumpTo(new File(output, name + ".json"), mode)));
+        ExportTask task = new ExportTask(name, () -> dumper.dumpTo(new File(output, name + ".json"), mode));
+        if (dumper instanceof ItemIconDumper) task.icons = (ItemIconDumper) dumper;
+        tasks.add(task);
     }
 
     private void planTasks() {
@@ -502,6 +559,7 @@ public final class ExportSession {
             if (!RecipeItemVariants.isComplete()) throw new IllegalStateException("Recipe item scan incomplete");
         }));
         add("itemicon", new ItemIconDumper(), 0);
+        if (imagesOnly) return;
         add("advitempanel", new AdvItemPanelDumper(), 0);
         tasks.add(new ExportTask("recipes", () -> new RecipesDumper().dump(0)));
         add("oreDictionary", new OreDictionaryDumper(), 0);
@@ -582,6 +640,7 @@ public final class ExportSession {
 
         private final String name;
         private final ExportAction action;
+        private ItemIconDumper icons;
 
         private ExportTask(String name, ExportAction action) {
             this.name = name;

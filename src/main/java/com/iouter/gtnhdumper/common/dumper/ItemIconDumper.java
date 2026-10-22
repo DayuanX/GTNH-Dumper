@@ -7,6 +7,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
@@ -45,10 +47,14 @@ import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 import com.iouter.gtnhdumper.common.utils.Utils;
 
 import bartworks.system.material.BWMetaGeneratedOres;
+import codechicken.nei.NEIClientUtils;
 import codechicken.nei.guihook.GuiContainerManager;
 import codechicken.nei.shadow.org.apache.commons.csv.CSVFormat;
 import codechicken.nei.shadow.org.apache.commons.csv.CSVPrinter;
 import cpw.mods.fml.client.FMLClientHandler;
+import cpw.mods.fml.common.FMLCommonHandler;
+import cpw.mods.fml.common.eventhandler.SubscribeEvent;
+import cpw.mods.fml.common.gameevent.TickEvent;
 import cpw.mods.fml.common.registry.GameData;
 import gregtech.common.blocks.GTBlockOre;
 import gtPlusPlus.core.block.base.BlockBaseOre;
@@ -63,6 +69,158 @@ public class ItemIconDumper extends WikiDumper {
     private static JsonObject resume;
     private static int resumedIcons;
     private static final Map<String, Integer> unregisteredItems = new LinkedHashMap<>();
+
+    private static ItemIconDumper pending;
+    private List<ItemStack> selectedStacks;
+    private File imageOutput;
+    private final Map<String, BufferedImage[]> timedFrames = new HashMap<>();
+    private final Map<String, BufferedImage> timedStatic = new HashMap<>();
+    private final Map<String, Object> captureReport = new LinkedHashMap<>();
+    private TimedCapture capture;
+
+    private File outputFile(String path) {
+        return imageOutput == null ? ModFilter.current()
+            .outputFile(path) : new File(imageOutput, path);
+    }
+
+    /** Sample wall-clock renderers before entering the synchronous PNG/metadata writer. */
+    public void prepareTimedIconsAsync(Runnable success, Consumer<Throwable> failure) {
+        if (pending != null) throw new IllegalStateException("An icon export is already pending");
+        pending = this;
+        imageOutput = ModFilter.current()
+            .outputFile("");
+        captureReport.clear();
+        try {
+            selectedStacks = new ArrayList<>();
+            Set<String> keys = ExportSession.imageKeys();
+            Set<String> missing = new HashSet<>(keys);
+            Map<String, ItemStack> timed = new LinkedHashMap<>();
+            for (ItemStack stack : AllItemStacks.getFilteredItemStacks()) {
+                String key = Utils.getItemStackShortKey(stack);
+                if (!keys.isEmpty() && !keys.contains(key)) continue;
+                missing.remove(key);
+                selectedStacks.add(stack);
+                if (ItemIconRenderProfile.forStack(stack).sampling != null) timed.putIfAbsent(key, stack.copy());
+            }
+            if (!missing.isEmpty()) throw new IllegalArgumentException("Unknown imageKeys: " + missing);
+            if (ExportSession.imageMetadata() != null || timed.isEmpty()) {
+                success.run();
+                return;
+            }
+            capture = new TimedCapture(timed, success, failure);
+            FMLCommonHandler.instance()
+                .bus()
+                .register(capture);
+        } catch (Exception | LinkageError error) {
+            cancelCapture();
+            failure.accept(error);
+        }
+    }
+
+    public void cancelCapture() {
+        if (capture != null) FMLCommonHandler.instance()
+            .bus()
+            .unregister(capture);
+        capture = null;
+        for (FBOHelper fbo : fbos.values()) fbo.close();
+        fbos.clear();
+        if (pending == this) pending = null;
+        selectedStacks = null;
+        imageOutput = null;
+        timedFrames.clear();
+        timedStatic.clear();
+    }
+
+    @Override
+    public void dumpFile() {
+        if (!canDump()) return;
+        final int mode = getMode();
+        final File file = ModFilter.current()
+            .outputFile("itemicon.json");
+        prepareTimedIconsAsync(() -> {
+            try {
+                Files.createDirectories(
+                    file.toPath()
+                        .getParent());
+                dumpTo(file, mode);
+                NEIClientUtils.printChatMessage(dumpMessage(file));
+            } catch (Exception | LinkageError error) {
+                GTNHDumper.LOG.error("Item icon export failed", error);
+            } finally {
+                cancelCapture();
+            }
+        }, error -> GTNHDumper.LOG.error("Item icon sampling failed", error));
+    }
+
+    /** Capture due frames on the render thread and record their actual wall-clock timestamps. */
+    public final class TimedCapture {
+
+        private final Map<String, ItemStack> stacks;
+        private final ItemIconRenderProfile.Sampling sampling;
+        private final Runnable success;
+        private final Consumer<Throwable> failure;
+        private long start = -1;
+        private int frame;
+        private final List<Long> sampleMillis = new ArrayList<>();
+
+        private TimedCapture(Map<String, ItemStack> stacks, Runnable success, Consumer<Throwable> failure) {
+            this.stacks = stacks;
+            this.success = success;
+            this.failure = failure;
+            sampling = ItemIconRenderProfile.forStack(
+                stacks.values()
+                    .iterator()
+                    .next()).sampling;
+            // One shared schedule keeps frame allocation, capture timing and metadata consistent for this batch.
+            for (Map.Entry<String, ItemStack> entry : stacks.entrySet()) {
+                if (ItemIconRenderProfile.forStack(entry.getValue()).sampling != sampling)
+                    throw new IllegalArgumentException("Timed icon batch requires a shared sampling schedule");
+                timedFrames.put(entry.getKey(), new BufferedImage[sampling.frameCount]);
+            }
+        }
+
+        @SubscribeEvent
+        public void renderTick(TickEvent.RenderTickEvent event) {
+            if (event.phase != TickEvent.Phase.END) return;
+            try {
+                long now = Minecraft.getSystemTime();
+                if (start < 0) start = now;
+                if (now - start < frame * (long) sampling.intervalMillis) return;
+                if (Minecraft.getMinecraft().theWorld == null)
+                    throw new IllegalStateException("World closed during icon capture");
+                sampleMillis.add(now - start);
+                for (Map.Entry<String, ItemStack> entry : stacks.entrySet()) {
+                    ItemStack stack = entry.getValue();
+                    FBOHelper fbo = getFbo(sampling.frameSize);
+                    try {
+                        timedFrames
+                            .get(entry.getKey())[frame] = renderItem(stack, fbo, RenderItem.getInstance(), 1f, null);
+                    } finally {
+                        fbo.restoreTexture();
+                    }
+                    if (frame == 0) {
+                        fbo = getFbo(SINGLE_FRAME_SIZE);
+                        try {
+                            timedStatic.put(entry.getKey(), renderItem(stack, fbo, RenderItem.getInstance(), 1f, null));
+                        } finally {
+                            fbo.restoreTexture();
+                        }
+                    }
+                }
+                if (++frame == sampling.frameCount) {
+                    FMLCommonHandler.instance()
+                        .bus()
+                        .unregister(this);
+                    capture = null;
+                    captureReport.put("sampleMillis", sampleMillis);
+                    success.run();
+                }
+            } catch (Exception | LinkageError error) {
+                cancelCapture();
+                failure.accept(error);
+            }
+        }
+    }
 
     public ItemIconDumper() {
         super("tools.dump.gtnhdumper.itemicon");
@@ -116,9 +274,11 @@ public class ItemIconDumper extends WikiDumper {
             metrics.put("encodingAndWriteTaskNanos", writer.encodeNanos());
             try {
                 Files.write(
-                    ModFilter.current()
-                        .outputFile("icon-performance.json")
-                        .toPath(),
+                    outputFile("icon-capture-report.json").toPath(),
+                    GTNHDumper.GSON.toJson(captureReport)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                Files.write(
+                    outputFile("icon-performance.json").toPath(),
                     GTNHDumper.GSON.toJson(metrics)
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8));
             } catch (IOException error) {
@@ -132,7 +292,7 @@ public class ItemIconDumper extends WikiDumper {
         frameCountMap.clear();
         dynamicSizeMap.clear();
 
-        List<ItemStack> itemStacks = AllItemStacks.getFilteredItemStacks();
+        List<ItemStack> itemStacks = selectedStacks == null ? AllItemStacks.getFilteredItemStacks() : selectedStacks;
 
         Map<String, String> redirectMap = new LinkedHashMap<>();
         Set<String> itemNameSet = new HashSet<>();
@@ -167,8 +327,20 @@ public class ItemIconDumper extends WikiDumper {
                 if (reference == null) {
                     ItemStack renderStack = stack.copy();
                     // NBT copies may serialize map entries in a different order. Keep the
-                    // original identity's filename even when the renderer works on a copy.
-                    renderGeneralItem(
+                    // original identity for filenames and captured-frame lookup while rendering a copy.
+                    ItemIconRenderProfile.Sampling sampling = ItemIconRenderProfile.forStack(renderStack).sampling;
+                    if (sampling != null) {
+                        String key = Utils.getItemStackShortKey(stack);
+                        BufferedImage[] frames = timedFrames.get(key);
+                        if (frames == null)
+                            throw new IllegalStateException("Timed icons require prepareTimedIconsAsync before dumpTo");
+                        FBOHelper.saveToFile(outputFile("icons/" + iconName), timedStatic.get(key));
+                        FBOHelper.saveToFile(
+                            outputFile("icons/" + getIconFileName(stack, true)),
+                            concatenateImages(frames, false));
+                        frameCountMap.put(renderStack, sampling.frameCount);
+                        dynamicSizeMap.put(renderStack, sampling.frameSize);
+                    } else renderGeneralItem(
                         renderStack,
                         getFbo(SINGLE_FRAME_SIZE),
                         RenderItem.getInstance(),
@@ -224,9 +396,7 @@ public class ItemIconDumper extends WikiDumper {
         if (reference != null) {
             try {
                 Files.write(
-                    ModFilter.current()
-                        .outputFile("image-mapping-diff.json")
-                        .toPath(),
+                    outputFile("image-mapping-diff.json").toPath(),
                     GTNHDumper.GSON.toJson(missingReference)
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8));
             } catch (IOException error) {
@@ -237,10 +407,7 @@ public class ItemIconDumper extends WikiDumper {
         }
 
         try (CSVPrinter printer = new CSVPrinter(
-            Files.newBufferedWriter(
-                ModFilter.current()
-                    .outputFile("image_redirect.csv")
-                    .toPath()),
+            Files.newBufferedWriter(outputFile("image_redirect.csv").toPath()),
             CSVFormat.DEFAULT)) {
             for (Map.Entry<String, String> e : redirectMap.entrySet()) {
                 printer.printRecord(e.getKey(), e.getValue());
@@ -341,6 +508,11 @@ public class ItemIconDumper extends WikiDumper {
         renderGeneralItem(itemStack, getFbo(SINGLE_FRAME_SIZE), itemRenderer);
     }
 
+    private static File iconOutputFile(String path) {
+        return pending == null ? ModFilter.current()
+            .outputFile(path) : pending.outputFile(path);
+    }
+
     private static FBOHelper getFbo(int size) {
         FBOHelper fbo = fbos.get(size);
         if (fbo == null) {
@@ -358,31 +530,79 @@ public class ItemIconDumper extends WikiDumper {
      *         Borrowed from <a href=
      *         "https://github.com/Snownee/Item-Render-Dark/blob/master/src/main/java/itemrender/rendering/Renderer.java">Item-Render-Rebirth</a>
      */
+    private static Map<String, Object> glDiagnostic() {
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("activeTexture", GL11.glGetInteger(org.lwjgl.opengl.GL13.GL_ACTIVE_TEXTURE));
+        state.put("textureEnabled", GLStateManager.glIsEnabled(GL11.GL_TEXTURE_2D));
+        state.put("textureBinding", GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D));
+        state.put("program", GL11.glGetInteger(org.lwjgl.opengl.GL20.GL_CURRENT_PROGRAM));
+        for (int matrix : new int[] { GL11.GL_MODELVIEW_MATRIX, GL11.GL_PROJECTION_MATRIX }) {
+            java.nio.FloatBuffer values = org.lwjgl.BufferUtils.createFloatBuffer(16);
+            GL11.glGetFloat(matrix, values);
+            float[] copy = new float[16];
+            values.get(copy);
+            state.put(matrix == GL11.GL_MODELVIEW_MATRIX ? "modelView" : "projection", copy);
+        }
+        state.put("cull", GL11.glIsEnabled(GL11.GL_CULL_FACE));
+        state.put("cullFace", GL11.glGetInteger(GL11.GL_CULL_FACE_MODE));
+        state.put("lineWidth", GL11.glGetFloat(GL11.GL_LINE_WIDTH));
+        state.put("depthMask", GL11.glGetBoolean(GL11.GL_DEPTH_WRITEMASK));
+        state.put("depthTest", GL11.glIsEnabled(GL11.GL_DEPTH_TEST));
+        state.put("depthFunc", GL11.glGetInteger(GL11.GL_DEPTH_FUNC));
+        state.put("clearDepth", GL11.glGetFloat(GL11.GL_DEPTH_CLEAR_VALUE));
+        state.put("scissor", GL11.glIsEnabled(GL11.GL_SCISSOR_TEST));
+        state.put("alphaTest", GL11.glIsEnabled(GL11.GL_ALPHA_TEST));
+        state.put("alphaFunc", GL11.glGetInteger(GL11.GL_ALPHA_TEST_FUNC));
+        state.put("alphaRef", GL11.glGetFloat(GL11.GL_ALPHA_TEST_REF));
+        state.put("blend", GL11.glIsEnabled(GL11.GL_BLEND));
+        state.put("blendSource", GL11.glGetInteger(GL11.GL_BLEND_SRC));
+        state.put("blendDestination", GL11.glGetInteger(GL11.GL_BLEND_DST));
+        state.put("framebuffer", GL11.glGetInteger(org.lwjgl.opengl.EXTFramebufferObject.GL_FRAMEBUFFER_BINDING_EXT));
+        java.nio.IntBuffer viewport = org.lwjgl.BufferUtils.createIntBuffer(16);
+        GL11.glGetInteger(GL11.GL_VIEWPORT, viewport);
+        state.put("viewport", new int[] { viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3) });
+        java.nio.ByteBuffer mask = org.lwjgl.BufferUtils.createByteBuffer(16);
+        GL11.glGetBoolean(GL11.GL_COLOR_WRITEMASK, mask);
+        state
+            .put("colorMask", new boolean[] { mask.get(0) != 0, mask.get(1) != 0, mask.get(2) != 0, mask.get(3) != 0 });
+        return state;
+    }
+
     public static BufferedImage renderItem(ItemStack itemStack, FBOHelper fbo, RenderItem itemRenderer, float scale,
         DynamicTexture dynamicTexture) {
         Minecraft minecraft = FMLClientHandler.instance()
             .getClient();
+        Map<String, Object> beforeFbo = ExportSession.imageDiagnostics() ? glDiagnostic() : null;
         fbo.begin();
+        Map<String, Object> insideFbo = ExportSession.imageDiagnostics() ? glDiagnostic() : null;
+        boolean restoreCull = ItemIconRenderProfile.forStack(itemStack).disableCull
+            && GL11.glIsEnabled(GL11.GL_CULL_FACE);
+        // Angelica expands wide lines to triangles; front-face culling would discard the wireframe.
+        if (restoreCull) GLStateManager.disableCull();
         GLStateManager.glMatrixMode(GL11.GL_PROJECTION);
         GLStateManager.glPushMatrix();
-        GLStateManager.glLoadIdentity();
-        GLStateManager.glOrtho(0, 16, 0, 16, -150.0F, 150.0F);
-        GLStateManager.glMatrixMode(GL11.GL_MODELVIEW);
-        RenderHelper.enableGUIStandardItemLighting();
-        GLStateManager.enableRescaleNormal();
-        GLStateManager.enableColorMaterial();
-        GLStateManager.enableLighting();
-        GLStateManager.glTranslated(8 * (1 - scale), 8 * (1 - scale), 0);
-        GLStateManager.glScaled(scale, scale, scale);
-        itemRenderer.renderItemAndEffectIntoGUI(minecraft.fontRenderer, minecraft.renderEngine, itemStack, 0, 0);
-        if (dynamicTexture != null) {
-            dynamicTexture.updateAnimation();
+        try {
+            GLStateManager.glLoadIdentity();
+            GLStateManager.glOrtho(0, 16, 0, 16, -150.0F, 150.0F);
+            GLStateManager.glMatrixMode(GL11.GL_MODELVIEW);
+            RenderHelper.enableGUIStandardItemLighting();
+            GLStateManager.enableRescaleNormal();
+            GLStateManager.enableColorMaterial();
+            GLStateManager.enableLighting();
+            GLStateManager.glTranslated(8 * (1 - scale), 8 * (1 - scale), 0);
+            GLStateManager.glScaled(scale, scale, scale);
+            itemRenderer.renderItemAndEffectIntoGUI(minecraft.fontRenderer, minecraft.renderEngine, itemStack, 0, 0);
+            if (dynamicTexture != null) {
+                dynamicTexture.updateAnimation();
+            }
+        } finally {
+            if (restoreCull) GLStateManager.enableCull();
+            GLStateManager.disableLighting();
+            RenderHelper.disableStandardItemLighting();
+            GLStateManager.glMatrixMode(GL11.GL_PROJECTION);
+            GL11.glPopMatrix();
+            fbo.end();
         }
-        GLStateManager.disableLighting();
-        RenderHelper.disableStandardItemLighting();
-        GLStateManager.glMatrixMode(GL11.GL_PROJECTION);
-        GL11.glPopMatrix();
-        fbo.end();
         if (itemStack.getItem() instanceof ItemBlock) {
             Block block = ((ItemBlock) itemStack.getItem()).field_150939_a;
             if (CommonProxy.isGTLoaded && (block instanceof GTBlockOre || block instanceof BWMetaGeneratedOres
@@ -390,7 +610,35 @@ public class ItemIconDumper extends WikiDumper {
                 return makeNonTransparentOpaque(fbo.saveToImage());
             }
         }
-        return fbo.saveToImage();
+        BufferedImage image = fbo.saveToImage();
+        if (pending != null && (ItemIconRenderProfile.forStack(itemStack).sampling != null || !ExportSession.imageKeys()
+            .isEmpty())) {
+            String key = Utils.getItemStackShortKey(itemStack);
+            if (image.getWidth() == SINGLE_FRAME_SIZE || !pending.captureReport.containsKey(key)) {
+                Map<String, Object> diagnostic = new LinkedHashMap<>();
+                int visible = 0;
+                for (int y = 0; y < image.getHeight(); y++)
+                    for (int x = 0; x < image.getWidth(); x++) if ((image.getRGB(x, y) >>> 24) != 0) visible++;
+                diagnostic.put("nonTransparentPixels", visible);
+                diagnostic.put("renderItemZLevel", itemRenderer.zLevel);
+                if (beforeFbo != null) {
+                    diagnostic.put("beforeFbo", beforeFbo);
+                    diagnostic.put("insideFbo", insideFbo);
+                }
+                diagnostic.put("width", image.getWidth());
+                diagnostic.put("height", image.getHeight());
+                net.minecraftforge.client.IItemRenderer renderer = net.minecraftforge.client.MinecraftForgeClient
+                    .getItemRenderer(itemStack, net.minecraftforge.client.IItemRenderer.ItemRenderType.INVENTORY);
+                diagnostic.put(
+                    "renderer",
+                    renderer == null ? null
+                        : renderer.getClass()
+                            .getName());
+                diagnostic.put("nbt", Utils.getItemNBT(itemStack));
+                pending.captureReport.put(key, diagnostic);
+            }
+        }
+        return image;
     }
 
     public static void renderGeneralItem(ItemStack itemStack, FBOHelper fbo, RenderItem itemRenderer) {
@@ -408,10 +656,7 @@ public class ItemIconDumper extends WikiDumper {
             return;
         }
         BufferedImage image = renderItem(itemStack, fbo, itemRenderer, 1f, null);
-        FBOHelper.saveToFile(
-            ModFilter.current()
-                .outputFile("icons/" + staticName),
-            image);
+        FBOHelper.saveToFile(iconOutputFile("icons/" + staticName), image);
         fbo.restoreTexture();
     }
 
@@ -452,9 +697,7 @@ public class ItemIconDumper extends WikiDumper {
             resume.get("directory")
                 .getAsString(),
             name).toPath();
-        java.nio.file.Path target = ModFilter.current()
-            .outputFile("icons/" + name)
-            .toPath();
+        java.nio.file.Path target = iconOutputFile("icons/" + name).toPath();
         try {
             Files.createDirectories(target.getParent());
             try {
@@ -496,14 +739,8 @@ public class ItemIconDumper extends WikiDumper {
         image = concatenateImages(images);
         frameCountMap.put(itemStack, image.getWidth() / image.getHeight());
         dynamicSizeMap.put(itemStack, image.getHeight());
-        FBOHelper.saveToFile(
-            ModFilter.current()
-                .outputFile("icons/" + staticName),
-            resizeImage(images[0], SINGLE_FRAME_SIZE));
-        FBOHelper.saveToFile(
-            ModFilter.current()
-                .outputFile("icons/" + dynamicName),
-            image);
+        FBOHelper.saveToFile(iconOutputFile("icons/" + staticName), resizeImage(images[0], SINGLE_FRAME_SIZE));
+        FBOHelper.saveToFile(iconOutputFile("icons/" + dynamicName), image);
         dynamicFbo.restoreTexture();
     }
 
@@ -539,11 +776,15 @@ public class ItemIconDumper extends WikiDumper {
      * @return 拼接后的大图
      */
     public static BufferedImage concatenateImages(BufferedImage[] images) {
+        return concatenateImages(images, true);
+    }
+
+    static BufferedImage concatenateImages(BufferedImage[] images, boolean deduplicate) {
         if (images == null || images.length == 0) {
             throw new IllegalArgumentException("Image array cannot be empty");
         }
 
-        if (deduplicateByPixel(images)) {
+        if (deduplicate && deduplicateByPixel(images)) {
             return images[0];
         }
 

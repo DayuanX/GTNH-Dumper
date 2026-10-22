@@ -79,3 +79,19 @@ GT 配方需要在加载配方前开启 `config/GregTech/Client.cfg` 的 `NEIRec
 配方物品的附加提示使用 `tooltip` 字段，通过 `RecipeItem.withTooltip(...)` 追加。
 普通配方物品序列化为以 `<br>` 连接的字符串；专用记录和流体槽也可保留提示列表。
 它与物品数据库的 `tooltips` 字段分开。神秘时代配方的 `research` 保持列表形式。
+
+### 定向图片与时钟动画
+
+`imagesOnly: true` 仅运行配方物品扫描和图标导出，不导出其他数据库。
+可配合 `imageKeys` 指定完整 `shortKey` 数组；未找到的 key 会报告失败。
+例如 `{"enabled":true,"imagesOnly":true,"imageKeys":["minecraft:diamond"]}`。
+`imageDiagnostics: true` 在 `icon-capture-report.json` 记录渲染器、非透明像素数、NBT 和 FBO 前后的 GL 状态，供定向图片诊断使用。
+
+GT 两种超立方体由客户端 RenderTick 同时按 50 ms 目标间隔采样 120 帧，动态帧为 64×64，静态图另以 256×256 渲染。
+实际采样时间记录在诊断文件中；低帧率会影响间隔。动画仍使用现有 `frameCount`、`size` 和 `_dynamic.png` 横向帧条格式，PNG 使用最大压缩。
+手动 NEI 导出及自动会话均等待采样和 PNG 写入完成后才发布映射或完成提示。
+这两项时钟动画重新采样，不从 `imageResume` 复用旧帧条；`imageMetadata` 仍只导入已有映射并跳过采样。
+
+特殊物品的选择规则和参数集中在 `ItemIconRenderProfile`，按注册名与 damage 选择，同一物品的 NBT 变体使用相同配置。
+定时采样与关闭面剔除分别配置；超立方体在绘制期间关闭剔除，以保留 Angelica 将宽线展开成的三角形，随后恢复原状态。
+普通物品保留现有静态图和纹理动画导出流程。当前所有定时采样物品共用一组采样参数。

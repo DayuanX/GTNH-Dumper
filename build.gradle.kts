@@ -129,3 +129,12 @@ val checkExportWorldCleanup by tasks.registering(JavaExec::class) {
 tasks.check.configure {
     dependsOn(checkExportWorldCleanup)
 }
+
+val checkTimedIconFrames by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Checks icon render profiles and timed frame dimensions and ordering without launching Minecraft."
+    classpath(configurations.compileClasspath, functionalTest.runtimeClasspath, sourceSets.main.get().output, sourceSets.patchedMc.get().output)
+    mainClass.set("com.iouter.gtnhdumper.common.dumper.TimedIconFramesRegression")
+}
+
+tasks.check.configure { dependsOn(checkTimedIconFrames) }
