@@ -227,7 +227,7 @@ public class ItemIconDumper extends WikiDumper {
     }
 
     @Override
-    protected boolean supportsModFilter() {
+    public boolean supportsModFilter() {
         return true;
     }
 

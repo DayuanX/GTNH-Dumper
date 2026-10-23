@@ -33,6 +33,21 @@ public final class ExportSettingsRegression {
                     .getAsLong() == 290002L,
                 "Default seed matches export settings");
             check(
+                defaults.get("noImages")
+                    .getAsBoolean(),
+                "Default export skips item image rendering");
+            check(
+                defaults.get("outputMode")
+                    .getAsString()
+                    .equals("timestamp"),
+                "Default output retains per-run directories");
+            check(
+                defaults.get("modFilter")
+                    .getAsString()
+                    .isEmpty(),
+                "Default export includes all mods");
+            check(new ExportOptions(defaults).noImages, "Generated settings and omitted settings share image defaults");
+            check(
                 !defaults.has("runId") && !defaults.has("imageKeys") && !defaults.has("imageMetadata"),
                 "Generated IDs and optional filters must stay absent");
             for (String flag : new String[] { "keepWorld", "smoke", "layoutsOnly", "imagesOnly", "imageDiagnostics" }) {
@@ -57,6 +72,8 @@ public final class ExportSettingsRegression {
             Files.delete(root);
         }
 
+        checkOptions();
+
         for (boolean pause : new boolean[] { true, false }) {
             for (EnumDifficulty difficulty : EnumDifficulty.values()) {
                 RecordingSettings settings = new RecordingSettings();
@@ -77,6 +94,39 @@ public final class ExportSettingsRegression {
             }
         }
         System.out.println("Export configuration and settings regression passed");
+    }
+
+    private static void checkOptions() {
+        com.google.gson.Gson gson = new com.google.gson.Gson();
+        ExportOptions defaults = new ExportOptions(new JsonObject());
+        check(defaults.noImages && !defaults.latest(), "Minimal requests update data without rendering icons");
+        ExportOptions latest = new ExportOptions(
+            gson.fromJson("{\"outputMode\":\"latest\",\"modFilter\":\" Example Addon \"}", JsonObject.class));
+        check(latest.latest() && latest.modFilter.equals("Example Addon"), "Fixed output and trimmed mod selection");
+        ExportOptions images = new ExportOptions(gson.fromJson("{\"noImages\":false}", JsonObject.class));
+        check(!images.noImages, "Full image export remains opt-in");
+        for (String mode : new String[] { "imagesOnly", "layoutsOnly" }) {
+            JsonObject request = new JsonObject();
+            request.addProperty("noImages", true);
+            request.addProperty(mode, true);
+            check(
+                !new ExportOptions(request).noImages,
+                "Explicit capture mode overrides generated noImages default: " + mode);
+        }
+        ExportOptions filteredImages = new ExportOptions(
+            gson.fromJson("{\"imagesOnly\":true,\"modFilter\":\"exampleaddon\"}", JsonObject.class));
+        check(!filteredImages.noImages, "Filtered image-only exports retain capture");
+        for (String invalid : new String[] { "{\"outputMode\":\"../elsewhere\"}",
+            "{\"imagesOnly\":true,\"layoutsOnly\":true}", "{\"imagesOnly\":true,\"smoke\":true}",
+            "{\"modFilter\":\"exampleaddon\",\"layoutsOnly\":true}",
+            "{\"modFilter\":\"exampleaddon\",\"smoke\":true}" }) {
+            try {
+                new ExportOptions(gson.fromJson(invalid, JsonObject.class));
+                throw new AssertionError("Expected invalid autorun options: " + invalid);
+            } catch (IllegalArgumentException expected) {
+                // Reject unsupported combinations before creating a world or clearing prior output.
+            }
+        }
     }
 
     private static final class RecordingSettings extends GameSettings {

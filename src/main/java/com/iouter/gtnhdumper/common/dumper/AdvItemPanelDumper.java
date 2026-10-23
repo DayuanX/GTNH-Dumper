@@ -40,7 +40,7 @@ public class AdvItemPanelDumper extends WikiDumper {
     }
 
     @Override
-    protected boolean supportsModFilter() {
+    public boolean supportsModFilter() {
         return true;
     }
 

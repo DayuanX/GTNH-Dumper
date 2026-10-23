@@ -55,18 +55,28 @@ public final class ModFilter {
     }
 
     public static ModFilter current() {
-        String input = ExportSession.isExporting() ? "" : ModFilterOption.INSTANCE.value();
+        if (ExportSession.isExporting()) return ExportSession.modFilter();
+        String input = ModFilterOption.INSTANCE.value();
         if (cachedFilter != null && java.util.Objects.equals(input, cachedInput)) return cachedFilter;
+        ModFilter filter = resolve(input);
+        cachedInput = input;
+        cachedFilter = filter;
+        return filter;
+    }
+
+    /** Resolve manual and autorun selections against the same loaded-mod names and IDs. */
+    public static ModFilter resolve(String input) {
         Map<String, String> mods = new LinkedHashMap<>();
         mods.put("minecraft", "Minecraft");
         for (ModContainer mod : Loader.instance()
             .getModList()) {
             mods.put(mod.getModId(), mod.getName());
         }
-        ModFilter filter = new ModFilter(input, mods);
-        cachedInput = input;
-        cachedFilter = filter;
-        return filter;
+        return new ModFilter(input, mods);
+    }
+
+    public String modId() {
+        return modId;
     }
 
     public boolean isActive() {

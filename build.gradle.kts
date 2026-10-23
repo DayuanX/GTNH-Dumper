@@ -147,3 +147,12 @@ val checkExportSettings by tasks.registering(JavaExec::class) {
 }
 
 tasks.check.configure { dependsOn(checkExportSettings) }
+
+val checkExportOutput by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Checks repeated autorun output, image retention and mod scope isolation without launching Minecraft."
+    classpath(configurations.compileClasspath, functionalTest.runtimeClasspath, sourceSets.main.get().output, sourceSets.patchedMc.get().output)
+    mainClass.set("com.iouter.gtnhdumper.automation.ExportOutputRegression")
+}
+
+tasks.check.configure { dependsOn(checkExportOutput) }

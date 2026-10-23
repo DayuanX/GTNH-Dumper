@@ -43,6 +43,10 @@ public final class ModFilterRegression {
             "Filtered output must be isolated");
 
         ModFilter addon = new ModFilter(" EXAMPLE ADDON ", mods);
+        check(
+            addon.modId()
+                .equals("exampleaddon"),
+            "Autorun reports the resolved ID for display-name requests");
         check(addon.matchesKey("exampleaddon:item"), "Full display names must resolve to mod IDs");
         check(!addon.matchesKey("gregtech:machine:1234"), "Changing mods must change the selected items");
         check(

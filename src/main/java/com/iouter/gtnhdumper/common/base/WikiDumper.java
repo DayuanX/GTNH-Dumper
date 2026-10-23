@@ -20,7 +20,7 @@ public abstract class WikiDumper extends FilteredDataDumper {
     }
 
     @Override
-    protected boolean supportsModFilter() {
+    public boolean supportsModFilter() {
         return false;
     }
 

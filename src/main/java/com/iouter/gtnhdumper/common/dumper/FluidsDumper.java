@@ -44,7 +44,7 @@ public class FluidsDumper extends WikiDumper {
     }
 
     @Override
-    protected boolean supportsModFilter() {
+    public boolean supportsModFilter() {
         return true;
     }
 

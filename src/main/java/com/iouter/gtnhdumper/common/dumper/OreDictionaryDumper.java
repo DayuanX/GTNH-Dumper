@@ -18,7 +18,7 @@ public class OreDictionaryDumper extends WikiDumper {
     }
 
     @Override
-    protected boolean supportsModFilter() {
+    public boolean supportsModFilter() {
         return true;
     }
 

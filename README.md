@@ -47,16 +47,62 @@ GT 配方需要在加载配方前开启 `config/GregTech/Client.cfg` 的 `NEIRec
 ```json
 {
   "enabled": true,
+  "outputMode": "latest",
+  "noImages": true,
+  "modFilter": "",
   "keepWorld": false,
   "exitGame": true
 }
 ```
 
-仅写 `{"enabled": true}` 也可使用上述默认值。自动流程由模组在客户端内执行。
+上例适合反复更新配方数据。仅写 `{"enabled": true}` 时使用时间戳目录，同样默认跳过图标导出。
+自动流程由模组在客户端内执行。
 启动时先将 `enabled` 改为 `false`，防止崩溃后重复运行；下次运行需手动重新开启。
 到主菜单后自动创建本次专用的 `Dumper-<runId>` 创造模式超平坦存档，等待 NEI 与神秘研究同步，
-逐项导出到 `dumper-runs/<runId>/dumps/`。`request.json` 留存本次参数，`status.json` 记录进度、耗时和错误。
-运行 ID 和存档名称需要保持唯一；发生冲突时导出停止并报告错误。
+逐项导出到所选输出目录。`request.json` 留存本次参数，`status.json` 记录进度、耗时、筛选范围和跳过的任务。
+每次仍生成独立的运行 ID 和存档名，固定输出目录只复用导出文件。
+
+### 输出目录与图片
+
+| 参数 | 默认值 | 行为 |
+| --- | --- | --- |
+| `outputMode` | `"timestamp"` | 每次写入 `dumper-runs/<runId>/dumps/`；改为 `"latest"` 后重复写入 `dumper-runs/latest/dumps/` |
+| `noImages` | `true` | 跳过物品图标任务；改为 `false` 时导出图标及动画 |
+| `modFilter` | `""` | 全量导出；填入已加载 Mod 的 ID 或完整名称后按前述来源规则筛选 |
+
+`latest` 在世界和 NEI 准备完成后更新本次范围的数据。旧配方、结构目录会先清除，
+因此附属更新时删除的配方也会从结果中移除。全量与各 Mod 的结果分别保存；
+例如 `modFilter: "gregtech"` 写入 `dumper-runs/latest/filtered/gregtech/dumps/`，
+对应的请求与状态也保存在这个 Mod 的目录中。
+时间戳模式的筛选数据写入 `dumper-runs/<runId>/dumps/filtered/<modid>/`，请求与状态保存在 `<runId>/` 下。
+
+`noImages: true` 保留该目录中的 `icons/`、`itemicon.json` 与图片重定向文件。
+首次只导出数据时得到配方、物品等 JSON；图片及动画映射可以沿用已有图标导出，
+需要补充新物品或更新纹理时设置 `noImages: false`。
+图标导出仍使用最大 PNG 压缩。`imagesOnly` 和 `layoutsOnly` 明确请求捕获素材，优先于 `noImages`。
+
+### 只更新一个附属
+
+```json
+{
+  "enabled": true,
+  "outputMode": "latest",
+  "modFilter": "TwistSpaceTechnology",
+  "noImages": true,
+  "exitGame": true
+}
+```
+
+筛选复用手动导出的归属规则，保留命中配方中的全部跨 Mod 原料与产物。
+物品与流体 JSON 只包含该 Mod 的条目，处理附属数据时与基础包的物品库组合使用。
+研究、任务和矿脉等缺少逐项归属的数据会列入 `status.json` 的 `skipped`，其余任务继续完成。
+配方来源缺失的分类另见 `recipes_filter_report.json`；GT 配方的来源采集需要提前开启 `NEIRecipeOwner`。
+`modFilter` 只控制本次自动会话，手动 NEI 筛选设置保持原值。
+
+`layoutsOnly` 的界面范围与配方注册来源不同，`smoke` 使用的 TiC 材料也缺少逐项归属；
+运行这两种模式时使用空 `modFilter`。配置组合错误会在创建存档、清理旧数据前报告。
+
+### 存档与结束流程
 
 导出后等待集成服务器保存、停止并刷新存档缓存。成功时按 `keepWorld` 保留或删除本次创建的存档；
 导出或停止阶段报错时保留存档。`exitGame: true` 随后退出客户端，`false` 返回主菜单。
@@ -66,7 +112,9 @@ GT 配方需要在加载配方前开启 `config/GregTech/Client.cfg` 的 `NEIRec
 可选参数：`runId`（1–101 位字母、数字、下划线或连字符，首字符必须是字母或数字，默认自动生成）、
 `seed`（默认 `290002`）、`smoke: true`（仅导出 TiC 材料以检查生命周期）、
 `layoutsOnly: true`（仅导出 NEI 布局原始资料）。两种模式同时开启时优先使用 `layoutsOnly`。
+时间戳模式的 `runId` 必须唯一，`latest` 为固定输出目录的保留名称。
 
+设置 `noImages: false` 后可以使用以下图标复用参数。
 `imageMetadata` 接受先前图标 JSON 映射文件路径，导入名称、帧数及尺寸等映射并跳过图标渲染。
 使用此参数时，请将对应 PNG 配齐到输出目录并核对图片。
 `imageResume` 接受包含 `directory` 和 `images` 的 JSON 清单：`images` 将 PNG 文件名映射到 `[宽, 高]`，

@@ -13,7 +13,7 @@ public abstract class FilteredDataDumper extends DataDumper {
         super(name);
     }
 
-    protected boolean supportsModFilter() {
+    public boolean supportsModFilter() {
         return true;
     }
 

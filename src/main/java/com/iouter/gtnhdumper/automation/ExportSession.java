@@ -55,6 +55,7 @@ import com.iouter.gtnhdumper.common.dumper.QuestLineDumper;
 import com.iouter.gtnhdumper.common.dumper.RecipesDumper;
 import com.iouter.gtnhdumper.common.dumper.TC4ResearchDumper;
 import com.iouter.gtnhdumper.common.dumper.TICMaterialDumper;
+import com.iouter.gtnhdumper.common.utils.ModFilter;
 import com.iouter.gtnhdumper.common.utils.RecipeCoverage;
 import com.iouter.gtnhdumper.common.utils.RecipeItemVariants;
 
@@ -77,7 +78,9 @@ public final class ExportSession {
     private final File runDirectory;
     private final File output;
     private final String runId;
-    private final boolean smoke;
+    private final ExportOptions options;
+    private final ExportOutput directories;
+    private final ModFilter filter;
     private final boolean managedByRunner;
     private final boolean keepWorld;
     private final boolean exitGame;
@@ -85,8 +88,6 @@ public final class ExportSession {
     private boolean worldCreated;
     private volatile boolean closingWorld;
     private volatile boolean lifecycleComplete;
-    private final boolean layoutsOnly;
-    private final boolean imagesOnly;
     private final boolean imageDiagnostics;
     private final Set<String> imageKeys = new LinkedHashSet<>();
     private ItemIconDumper pendingIcons;
@@ -100,6 +101,7 @@ public final class ExportSession {
     private final List<String> researchKeys = new ArrayList<>();
     private final List<String> completed = new ArrayList<>();
     private final List<String> failed = new ArrayList<>();
+    private final Map<String, String> skipped = new LinkedHashMap<>();
     private final List<ExportTask> tasks = new ArrayList<>();
     private final Map<String, Long> taskMillis = new LinkedHashMap<>();
     private final AtomicInteger loggedErrors = new AtomicInteger();
@@ -131,16 +133,10 @@ public final class ExportSession {
             .toRealPath()
             .resolve("saves")
             .resolve("Dumper-" + runId);
-        smoke = request.has("smoke") && request.get("smoke")
-            .getAsBoolean();
-        layoutsOnly = request.has("layoutsOnly") && request.get("layoutsOnly")
-            .getAsBoolean();
+        options = new ExportOptions(request);
+        filter = ModFilter.resolve(options.modFilter);
         imageDiagnostics = request.has("imageDiagnostics") && request.get("imageDiagnostics")
             .getAsBoolean();
-        imagesOnly = request.has("imagesOnly") && request.get("imagesOnly")
-            .getAsBoolean();
-        if (imagesOnly && (layoutsOnly || smoke))
-            throw new IllegalArgumentException("imagesOnly excludes layoutsOnly/smoke");
         if (request.has("imageKeys")) {
             for (com.google.gson.JsonElement key : request.getAsJsonArray("imageKeys")) {
                 String value = key.getAsString();
@@ -151,22 +147,19 @@ public final class ExportSession {
         }
         seed = request.has("seed") ? request.get("seed")
             .getAsLong() : 290002L;
-        imageMetadata = request.has("imageMetadata") ? new File(
+        imageMetadata = !options.noImages && request.has("imageMetadata") ? new File(
             request.get("imageMetadata")
                 .getAsString())
             : null;
         if (imageMetadata != null && !imageMetadata.isFile())
             throw new IllegalArgumentException("Reference image metadata is missing");
-        imageResume = request.has("imageResume") ? new File(
+        imageResume = !options.noImages && request.has("imageResume") ? new File(
             request.get("imageResume")
                 .getAsString())
             : null;
-        runDirectory = new File(gameDirectory, "dumper-runs/" + runId);
-        if (new File(runDirectory, "status.json").exists()) {
-            throw new IllegalArgumentException("Export run ID already used");
-        }
-        output = new File(runDirectory, "dumps");
-        Files.createDirectories(output.toPath());
+        directories = ExportOutput.create(gameDirectory.toPath(), runId, options.latest(), filter);
+        runDirectory = directories.runDirectory.toFile();
+        output = directories.outputDirectory.toFile();
         Files.write(
             new File(runDirectory, "request.json").toPath(),
             GTNHDumper.GSON.toJson(request)
@@ -235,12 +228,15 @@ public final class ExportSession {
             defaults.addProperty("enabled", false);
             defaults.addProperty("keepWorld", false);
             defaults.addProperty("exitGame", true);
+            defaults.addProperty("outputMode", "timestamp");
+            defaults.addProperty("noImages", true);
+            defaults.addProperty("modFilter", "");
             defaults.addProperty("seed", 290002L);
             defaults.addProperty("smoke", false);
             defaults.addProperty("layoutsOnly", false);
             defaults.addProperty("imagesOnly", false);
             defaults.addProperty("imageDiagnostics", false);
-            // Omitted image paths/keys select a full export; runId is generated for each armed launch.
+            // Image capture is opt-in; runId is generated separately for each world, even with a fixed output path.
             Files.createDirectories(path.getParent());
             Files.write(
                 path,
@@ -258,6 +254,11 @@ public final class ExportSession {
 
     public static File outputDirectory() {
         return active.output;
+    }
+
+    /** Resolved once at startup; changing a saved NEI filter does not change this export's scope. */
+    public static ModFilter modFilter() {
+        return active.filter;
     }
 
     public static boolean imageDiagnostics() {
@@ -411,6 +412,7 @@ public final class ExportSession {
                 }
                 // Allow pending client packets/render initialization to settle after explicit readiness checks.
                 if (++readyTicks < 40) return;
+                directories.clearData(options.layoutsOnly, options.imagesOnly, options.smoke);
                 planTasks();
                 status("EXPORTING", "World prepared; NEI and research are ready");
             }
@@ -576,20 +578,24 @@ public final class ExportSession {
     }
 
     private void add(String name, WikiDumper dumper, int mode) {
+        if (filter.isActive() && !dumper.supportsModFilter()) {
+            skipped.put(name, "This data has no reliable per-entry mod ownership");
+            return;
+        }
         ExportTask task = new ExportTask(name, () -> dumper.dumpTo(new File(output, name + ".json"), mode));
         if (dumper instanceof ItemIconDumper) task.icons = (ItemIconDumper) dumper;
         tasks.add(task);
     }
 
     private void planTasks() {
-        if (layoutsOnly) {
+        if (options.layoutsOnly) {
             tasks.add(
                 new ExportTask(
                     "nei-layouts",
                     () -> com.iouter.gtnhdumper.common.dumper.NEILayoutDumper.dump(new File(output, "nei-layouts"))));
             return;
         }
-        if (smoke) {
+        if (options.smoke) {
             add("ticmaterial", new TICMaterialDumper(), 1);
             return;
         }
@@ -602,8 +608,9 @@ public final class ExportSession {
                     .getBytes(StandardCharsets.UTF_8));
             if (!RecipeItemVariants.isComplete()) throw new IllegalStateException("Recipe item scan incomplete");
         }));
-        add("itemicon", new ItemIconDumper(), 0);
-        if (imagesOnly) return;
+        if (!options.noImages) add("itemicon", new ItemIconDumper(), 0);
+        else skipped.put("itemicon", "noImages: existing images and icon metadata are retained");
+        if (options.imagesOnly) return;
         add("advitempanel", new AdvItemPanelDumper(), 0);
         tasks.add(new ExportTask("recipes", () -> new RecipesDumper().dump(0)));
         add("oreDictionary", new OreDictionaryDumper(), 0);
@@ -632,10 +639,15 @@ public final class ExportSession {
         result.addProperty("stage", stage);
         result.addProperty("message", message);
         result.addProperty("updatedMillis", System.currentTimeMillis());
-        result.addProperty("smoke", smoke);
-        result.addProperty("layoutsOnly", layoutsOnly);
+        result.addProperty("smoke", options.smoke);
+        result.addProperty("layoutsOnly", options.layoutsOnly);
+        result.addProperty("imagesOnly", options.imagesOnly);
+        result.addProperty("outputMode", options.outputMode);
+        result.addProperty("noImages", options.noImages);
+        result.addProperty("modFilter", filter.modId());
+        result.addProperty("outputDirectory", output.getAbsolutePath());
         // Requested reuse is not a count or proof of complete image coverage.
-        result.addProperty("imagesReused", imageMetadata != null || imageResume != null);
+        result.addProperty("imagesReused", !options.noImages && (imageMetadata != null || imageResume != null));
         result.addProperty("keepWorld", keepWorld);
         result.addProperty("exitGame", exitGame);
         result.addProperty("managedByRunner", managedByRunner);
@@ -646,6 +658,7 @@ public final class ExportSession {
         result.add("completed", GTNHDumper.GSON.toJsonTree(completed));
         result.add("taskMillis", GTNHDumper.GSON.toJsonTree(taskMillis));
         result.add("failed", GTNHDumper.GSON.toJsonTree(failed));
+        result.add("skipped", GTNHDumper.GSON.toJsonTree(skipped));
         result.add("unsupportedRecipeSources", GTNHDumper.GSON.toJsonTree(RecipeCoverage.unsupported()));
         File temporary = new File(runDirectory, "status.tmp");
         Files.write(

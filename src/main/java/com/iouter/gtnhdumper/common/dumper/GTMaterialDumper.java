@@ -634,7 +634,7 @@ public class GTMaterialDumper extends WikiDumper {
     }
 
     @Override
-    protected boolean supportsModFilter() {
+    public boolean supportsModFilter() {
         return true;
     }
 
