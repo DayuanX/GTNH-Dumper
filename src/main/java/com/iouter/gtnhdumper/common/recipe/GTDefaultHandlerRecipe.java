@@ -237,7 +237,7 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
     public static class GTDumpedRecipe {
 
         private final ArrayList<Object> inputItems;
-        private final ArrayList<RecipeFluid> inputFluids;
+        private final ArrayList<Object> inputFluids;
         private final ArrayList<Object> outputItems;
         private final ArrayList<RecipeFluid> outputFluids;
         private final ArrayList<Object> otherItems;
@@ -270,11 +270,19 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
                     Map<net.minecraftforge.fluids.FluidStack, Integer> durations = (Map<net.minecraftforge.fluids.FluidStack, Integer>) field
                         .get(recipe.mSpecialItems);
                     fluidDurations = new LinkedHashMap<>();
-                    durations.forEach(
-                        (fluid, ticks) -> fluidDurations.put(
+                    ArrayList<RecipeFluid> alternatives = new ArrayList<>();
+                    durations.forEach((fluid, ticks) -> {
+                        fluidDurations.put(
                             fluid.getFluid()
                                 .getName(),
-                            ticks));
+                            ticks);
+                        alternatives.add(
+                            new RecipeFluid(fluid).withNBT(fluid)
+                                .withChance(recipe.getFluidInputChance(0)));
+                    });
+                    // NEI的单个流体槽轮播全部切削液，保留各候选的用量和游戏顺序。
+                    inputFluids.clear();
+                    inputFluids.add(alternatives);
                 } catch (ReflectiveOperationException error) {
                     throw new IllegalStateException("Cannot read cutting fluid durations", error);
                 }
@@ -315,7 +323,7 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
             ArrayList<Object> outputItems, ArrayList<RecipeFluid> outputFluids, ArrayList<Object> otherItems, int eut,
             long duration, int specialValue, Map<String, Object> metadata) {
             this.inputItems = inputItems;
-            this.inputFluids = inputFluids;
+            this.inputFluids = new ArrayList<>(inputFluids);
             this.outputItems = outputItems;
             this.outputFluids = outputFluids;
             this.otherItems = otherItems;

@@ -3,6 +3,13 @@
 
  Special thanks : https://github.com/GTNewHorizons/ExampleMod1.7.10
 
+## 板材切割机数据
+
+板材切割机保留合并配方，`inputFluids` 的首个槽位保存切削液候选列表，
+每个候选包含实际用量、概率及 NBT。候选顺序与游戏一致，供 Wiki 流体槽轮播。
+`fluidDurations` 保存各流体的耗时（tick），界面按候选顺序固定显示斜杠分隔的时间列表。
+旧记录继续使用自身的流体和耗时。
+
 ## 按 Mod 导出
 
 在游戏内打开 **NEI 选项 → 工具 → 数据导出 → GTNH Dumper**，在 **Mod 筛选 / Mod filter**
