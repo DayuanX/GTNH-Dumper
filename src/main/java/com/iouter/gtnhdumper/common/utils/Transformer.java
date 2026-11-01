@@ -114,6 +114,7 @@ public class Transformer {
             src.mDuration,
             src.mSpecialValue,
             metadata).withSourceMod(GTDefaultHandlerRecipe.originalOwner(src))
+                .withNbtSensitive(src.isNBTSensitive)
                 .withInputAspects(inputAspects)
                 .withDisplayData(src);
     }

@@ -246,6 +246,8 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
         private Integer specialValue;
         private final Map<String, Object> metadata;
         private String sourceMod;
+        // Null when the source does not expose GTRecipe's NBT matching flag (e.g. Eye of Harmony).
+        private Boolean nbtSensitive;
         private List<String> neiDescription;
         private String neiDescriptionError;
         private Integer burnTime;
@@ -308,6 +310,11 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
 
         public GTDumpedRecipe withSourceMod(String sourceMod) {
             this.sourceMod = sourceMod;
+            return this;
+        }
+
+        public GTDumpedRecipe withNbtSensitive(boolean nbtSensitive) {
+            this.nbtSensitive = nbtSensitive;
             return this;
         }
 
