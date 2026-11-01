@@ -250,7 +250,7 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
         private String neiDescriptionError;
         private Integer burnTime;
         private List<String> allowedBoilerTypes;
-        private Map<String, Integer> fluidDurations;
+        private List<Integer> fluidDurations;
         private thaumcraft.api.aspects.AspectList inputAspects;
 
         public GTDumpedRecipe withInputAspects(thaumcraft.api.aspects.AspectList aspects) {
@@ -269,13 +269,11 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
                     @SuppressWarnings("unchecked")
                     Map<net.minecraftforge.fluids.FluidStack, Integer> durations = (Map<net.minecraftforge.fluids.FluidStack, Integer>) field
                         .get(recipe.mSpecialItems);
-                    fluidDurations = new LinkedHashMap<>();
+                    fluidDurations = new ArrayList<>();
                     ArrayList<RecipeFluid> alternatives = new ArrayList<>();
                     durations.forEach((fluid, ticks) -> {
-                        fluidDurations.put(
-                            fluid.getFluid()
-                                .getName(),
-                            ticks);
+                        // 同一种流体可有不同用量和耗时，按候选顺序保留每一项。
+                        fluidDurations.add(ticks);
                         alternatives.add(
                             new RecipeFluid(fluid).withNBT(fluid)
                                 .withChance(recipe.getFluidInputChance(0)));
@@ -323,7 +321,7 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
             ArrayList<Object> outputItems, ArrayList<RecipeFluid> outputFluids, ArrayList<Object> otherItems, int eut,
             long duration, int specialValue, Map<String, Object> metadata) {
             this.inputItems = inputItems;
-            this.inputFluids = new ArrayList<>(inputFluids);
+            this.inputFluids = inputFluids == null ? null : new ArrayList<>(inputFluids);
             this.outputItems = outputItems;
             this.outputFluids = outputFluids;
             this.otherItems = otherItems;
