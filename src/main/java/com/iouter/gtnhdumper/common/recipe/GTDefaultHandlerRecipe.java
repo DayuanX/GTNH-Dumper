@@ -31,7 +31,7 @@ import gregtech.api.enums.Materials;
 import gregtech.api.recipe.BasicUIProperties;
 import gregtech.api.recipe.RecipeCategory;
 import gregtech.api.recipe.RecipeMap;
-import gregtech.api.recipe.RecipeMapBackend;
+import gregtech.api.recipe.RecipeMaps;
 import gregtech.api.util.GTRecipe;
 import gregtech.nei.GTNEIDefaultHandler;
 import tectech.TecTech;
@@ -57,9 +57,7 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
         if (ModFilter.current()
             .isActive()) {
             RecipeCategory category = getRecipeCategory(handler);
-            long unknown = recipeMap.getBackend()
-                .getAllRecipes()
-                .stream()
+            long unknown = sourceRecipes(handler).stream()
                 .filter(recipe -> recipe.getRecipeCategory() == category && !recipe.mHidden)
                 .filter(recipe -> originalOwner(recipe) == null)
                 .count();
@@ -83,8 +81,7 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
         List<GTDumpedRecipe> recipes = new ArrayList<>();
         RecipeCategory category = getRecipeCategory(handler);
         RecipeMap<?> recipeMap = handler.getRecipeMap();
-        RecipeMapBackend recipeMapBackend = recipeMap.getBackend();
-        Collection<GTRecipe> gtRecipes = recipeMapBackend.getAllRecipes();
+        Collection<GTRecipe> gtRecipes = sourceRecipes(handler);
         ModFilter filter = ModFilter.current();
         if (recipeMap.getFrontend() instanceof EyeOfHarmonyFrontend) {
             // This custom storage does not retain GTRecipe's owner history.
@@ -177,6 +174,13 @@ public class GTDefaultHandlerRecipe extends BaseHandlerRecipe {
             .filter(Objects::nonNull)
             .forEach(recipes::add);
         return recipes;
+    }
+
+    private static Collection<GTRecipe> sourceRecipes(GTNEIDefaultHandler handler) {
+        RecipeMap<?> map = handler.getRecipeMap();
+        if (map == RecipeMaps.cutterFakeRecipes) return CuttingRecipeGroups.getRecipes(getRecipeCategory(handler));
+        return map.getBackend()
+            .getAllRecipes();
     }
 
     public static String originalOwner(GTRecipe recipe) {
